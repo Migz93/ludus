@@ -1,0 +1,25 @@
+# Local build output and temporary source trees
+build/
+cmake-build-*/
+*.o
+*.so
+*.a
+*.rcc
+
+# Qt, editor, and OS metadata
+.qt/
+.qmlls.ini
+.qmake.stash
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+
+# Runtime state, logs, and credentials
+*.log
+*.dmp
+.env
+.env.*
+secrets/
+tokens/

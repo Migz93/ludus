@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Plasma Login's greeter uses Qt private APIs.  After an OS update, an older
+# locally-built greeter may no longer load.  Preserve a usable login screen by
+# falling back to Bazzite's vendor greeter until Ludus is rebuilt.
+set -Eeuo pipefail
+
+custom=/usr/local/lib/ludus/plasma-login-greeter
+vendor=/usr/libexec/plasma-login-greeter
+
+if [[ -x "$custom" ]] && ! /usr/bin/ldd -r "$custom" 2>&1 | grep -qE 'not found|undefined symbol'; then
+    exec "$custom" "$@"
+fi
+
+echo "Ludus greeter is incompatible with the installed Qt/Plasma version; using the stock Plasma Login greeter." >&2
+exec "$vendor" "$@"

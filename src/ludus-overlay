@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Wait for the compositor created by startplasma-wayland, then keep a simple
+# fullscreen cover up while Steam starts.  It is deliberately a sibling of
+# Plasma so closing the cover never terminates the user's desktop session.
+set -Eeuo pipefail
+
+runtime_dir=${XDG_RUNTIME_DIR:?XDG_RUNTIME_DIR is required}
+for _ in $(seq 1 300); do
+    for socket in "$runtime_dir"/wayland-*; do
+        [[ -S "$socket" ]] || continue
+        export WAYLAND_DISPLAY=${socket##*/}
+        exec /usr/local/lib/ludus/ludus-splash
+    done
+    sleep 0.1
+done
+
+exit 1

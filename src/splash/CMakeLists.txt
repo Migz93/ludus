@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.20)
+project(ludus-splash LANGUAGES CXX)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Quick)
+find_package(LayerShellQt REQUIRED)
+qt_add_executable(ludus-splash main.cpp)
+target_link_libraries(ludus-splash PRIVATE Qt6::Core Qt6::Gui Qt6::Quick LayerShellQt::Interface)

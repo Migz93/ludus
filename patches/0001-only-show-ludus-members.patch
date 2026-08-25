@@ -1,0 +1,42 @@
+diff --git a/src/frontend/settings/models/usermodel.cpp b/src/frontend/settings/models/usermodel.cpp
+--- a/src/frontend/settings/models/usermodel.cpp
++++ b/src/frontend/settings/models/usermodel.cpp
+@@ -5,11 +5,29 @@
+  */
+ 
+ #include <KUser>
+ 
++#include <grp.h>
+ #include <pwd.h>
+ 
+ #include "plasmaloginsettings.h"
+ 
+ #include "usermodel.h"
+ 
++static bool isLudusMember(const QString &name, gid_t primaryGroup)
++{
++    const group *ludusGroup = getgrnam("ludus");
++    if (!ludusGroup) {
++        return false;
++    }
++    if (primaryGroup == ludusGroup->gr_gid) {
++        return true;
++    }
++    for (char **member = ludusGroup->gr_mem; member && *member; ++member) {
++        if (name == QString::fromLocal8Bit(*member)) {
++            return true;
++        }
++    }
++    return false;
++}
++
+ UserModel::UserModel(QObject *parent)
+@@ -107,5 +125,8 @@ void UserModel::populate()
+         if (cannotLogin || (!inLogindDefRange && !inHomedRange)) {
+             continue;
+         }
++        if (!isLudusMember(user.loginName(), gid)) {
++            continue;
++        }
+ 
+         struct passwd *pw = getpwuid(uid);

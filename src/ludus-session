@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+# This is Bazzite Desktop, so the user session must be a normal Plasma Wayland
+# session.  Do not let Plasma's own branded splash replace the Ludus cover.
+# The runtime mask dies with the user manager at logout, so normal Plasma use
+# outside this dedicated Ludus session is unaffected.
+systemctl --user mask --runtime plasma-ksplash.service >/dev/null 2>&1 || true
+
+# The overlay waits for its Wayland socket, covers startup, and launches Steam
+# Big Picture once it can connect.
+/usr/local/lib/ludus/ludus-overlay &
+exec /usr/libexec/plasma-dbus-run-session-if-needed /usr/bin/startplasma-wayland

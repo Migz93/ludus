@@ -1,0 +1,3 @@
+# Only ludus members bypass a password at the local Plasma Login greeter.
+# SSH and every other PAM service are unaffected.
+auth  [success=done default=ignore] pam_succeed_if.so user ingroup ludus

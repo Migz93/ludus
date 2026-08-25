@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Ludus
+Comment=Plasma session that opens Steam Big Picture behind a loading screen
+Exec=/usr/local/lib/ludus/ludus-session
+TryExec=/usr/local/lib/ludus/ludus-session
+DesktopNames=Ludus

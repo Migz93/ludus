@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Steam's client still uses Xwayland for part of its UI.  The loading cover can
+# connect to Wayland before Xwayland is ready, so discover KWin's display and
+# cookie and wait until the X server accepts a connection before launching.
+set -Eeuo pipefail
+
+ready_file="$XDG_RUNTIME_DIR/ludus-steam-ready"
+[[ -e "$ready_file" ]] && unlink "$ready_file"
+
+for _ in $(seq 1 300); do
+    while read -r pid; do
+        args=$(tr '\0' '\n' < "/proc/$pid/cmdline" 2>/dev/null || true)
+        display=$(printf '%s\n' "$args" | sed -n '/^--xwayland-display$/{n;p;q;}')
+        authority=$(printf '%s\n' "$args" | sed -n '/^--xwayland-xauthority$/{n;p;q;}')
+        [[ -n "$display" && -n "$authority" && -r "$authority" ]] || continue
+        if DISPLAY="$display" XAUTHORITY="$authority" /usr/bin/xdpyinfo >/dev/null 2>&1; then
+            export DISPLAY="$display" XAUTHORITY="$authority"
+            /usr/bin/bazzite-steam steam://open/bigpicture &
+            steam_pid=$!
+            for _ in $(seq 1 450); do
+                if /usr/bin/wmctrl -lx 2>/dev/null | grep -qiE 'steam.*(big picture|gamepadui)|steamwebhelper.*steam'; then
+                    : > "$ready_file"
+                    break
+                fi
+                sleep 0.2
+            done
+            wait "$steam_pid"
+            exit $?
+        fi
+    done < <(pgrep -u "$(id -u)" -x kwin_wayland || true)
+    sleep 0.2
+done
+
+exit 1

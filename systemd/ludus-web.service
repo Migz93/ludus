@@ -1,0 +1,13 @@
+[Unit]
+Description=Ludus management WebUI
+After=network-online.target ludus-backend.service
+Wants=network-online.target
+
+[Service]
+User=ludus-web
+Group=ludus-web
+ExecStart=/usr/local/lib/ludus/ludus-web
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

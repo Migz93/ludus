@@ -2,6 +2,14 @@
 
 Ludus is an experimental, controller-first multi-user launcher for **Bazzite Desktop KDE**. It presents a console-style player selector, starts a separate Linux user session for the selected player, and hands off to Steam Big Picture only after it is ready.
 
+Ludus is a single-player console experience: only one Ludus user session may be
+active at a time.  A player must sign out before another player signs in; it
+does not support concurrent player sessions or in-session user switching.
+
+Shared Steam libraries are a Phase 2 feature in progress.  They share installed
+files, not Steam ownership: every player still needs the relevant entitlement
+on their own Steam account to launch a game.
+
 ## Phase 1 status
 
 This project has been tested on the Bazzite KDE VM with Plasma Login Manager and Wayland. It uses normal Bazzite Desktop Plasma—not the Bazzite Deck/Gaming Mode image—and launches `/usr/bin/bazzite-steam steam://open/bigpicture` inside the selected user's normal Plasma Wayland session.
@@ -65,6 +73,20 @@ After installing, restart Plasma Login or reboot:
 sudo systemctl restart plasmalogin
 ```
 
+## Management WebUI
+
+The installer starts the authenticated management service on port `9876` and
+opens it only to the directly connected private IPv4 subnet. It refuses to add
+a firewall opening when that subnet cannot be identified as private. It prints a one-time initial `admin` password. Open
+`http://<ludus-hostname-or-LAN-IP>:9876/` from a trusted home-network device.
+The WebUI can enrol/remove players, manage existing shared-library directories,
+run safe repair checks, and rotate its own credentials. Removing a player or
+library never deletes a Linux account, game files, or home data.
+
+The current service intentionally uses HTTP Basic authentication as its first
+transport boundary. Do not expose it to the Internet; session/rate-limit
+hardening remains to be completed.
+
 ## Update behavior
 
 Plasma Login uses Qt private APIs, so an OS update can require rebuilding Ludus. If the old custom greeter cannot load, the Ludus wrapper automatically falls back to Bazzite's stock Plasma Login greeter. Re-run `sudo ./install.sh` after booting the new deployment to rebuild Ludus for the updated Plasma version.
@@ -83,6 +105,7 @@ The uninstaller removes Ludus configuration and restores normal Plasma Login. It
 - Steam readiness is detected through its Xwayland Big Picture window; Steam may change this in future.
 - The VM cannot validate final GPU, display, HDMI/VRR, or controller behavior.
 - On the current SELinux-enforcing test VM, the controller bridge is denied access to `/dev/uinput`; it now fails once rather than looping. A narrowly scoped device-access policy is still needed before controller remapping can be enabled and validated there.
-- Player switching from Steam is planned for a later phase.
+- Player switching from Steam is not supported.  A player must sign out before
+  another Ludus user can sign in.
 
 See [Phase1.md](Phase1.md) for the original Phase 1 brief.

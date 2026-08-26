@@ -1,0 +1,11 @@
+[Unit]
+Description=Ludus privileged management backend
+After=local-fs.target
+
+[Service]
+ExecStart=/usr/local/lib/ludus/ludus-backend
+Restart=on-failure
+RuntimeDirectory=ludus
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,12 @@
+[Unit]
+Description=Restrict Ludus WebUI to the private LAN
+After=network-online.target firewalld.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/ludus/ludus-web-firewall
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

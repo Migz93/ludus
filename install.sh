@@ -40,7 +40,8 @@ if ((${#missing[@]})); then
 fi
 
 backup=/var/lib/ludus/backups/$(date +%Y%m%d-%H%M%S)
-install -d -m 0700 "$backup" "$config_dir"
+install -d -m 0700 "$backup" /var/lib/ludus
+install -d -m 0755 "$config_dir"
 install -d -m 0755 "$install_root"
 install -d -m 0755 /etc/systemd/user/plasma-login.service.d /usr/local/share/wayland-sessions
 for file in /etc/pam.d/plasmalogin /etc/pam.d/plasmalogin-ludus /etc/systemd/user/plasma-login.service.d/ludus.conf "$unit_dir/ludus.service" /usr/local/share/wayland-sessions/ludus.desktop; do
@@ -64,12 +65,34 @@ install -m 0644 "$project_dir/src/splash/Splash.qml" "$install_root/Splash.qml"
 install -m 0755 "$project_dir/src/ludus-session" "$install_root/ludus-session"
 install -m 0755 "$project_dir/src/ludus-overlay" "$install_root/ludus-overlay"
 install -m 0755 "$project_dir/src/ludus-steam" "$install_root/ludus-steam"
+install -m 0755 "$project_dir/src/ludusctl" "$install_root/ludusctl"
+install -m 0755 "$project_dir/src/ludus-disks.py" "$install_root/ludus-disks"
+install -m 0755 "$project_dir/src/ludus-steam-register-libraries" "$install_root/ludus-steam-register-libraries"
+install -m 0755 "$project_dir/src/ludus-mountd.py" "$install_root/ludus-mountd"
+install -m 0755 "$project_dir/src/ludus-mountctl.py" "$install_root/ludus-mountctl"
+install -m 0755 "$project_dir/src/ludus-backend.py" "$install_root/ludus-backend"
+install -m 0755 "$project_dir/src/ludus-web.py" "$install_root/ludus-web"
+cc -O2 -Wall -Wextra -o "$install_root/ludus-pam-auth" "$project_dir/src/ludus-pam-auth.c" -lpam
+install -m 0755 "$project_dir/src/ludus-web-firewall" "$install_root/ludus-web-firewall"
+ln -sfn "$install_root/ludusctl" /usr/local/bin/ludusctl
 install -m 0644 "$project_dir/systemd/ludus.service" "$unit_dir/ludus.service"
+install -m 0644 "$project_dir/systemd/ludus-mount.service" "$unit_dir/ludus-mount.service"
+install -m 0644 "$project_dir/systemd/ludus-backend.service" "$unit_dir/ludus-backend.service"
+install -m 0644 "$project_dir/systemd/ludus-web.service" "$unit_dir/ludus-web.service"
+install -m 0644 "$project_dir/systemd/ludus-web-firewall.service" "$unit_dir/ludus-web-firewall.service"
 install -m 0644 "$project_dir/sessions/ludus.desktop" /usr/local/share/wayland-sessions/ludus.desktop
 install -m 0644 "$project_dir/config/plasmalogin-ludus.pam" /etc/pam.d/plasmalogin-ludus
+install -m 0644 "$project_dir/config/ludus-web.pam" /etc/pam.d/ludus-web
 install -m 0644 "$project_dir/systemd/plasma-login.service.d/ludus.conf" /etc/systemd/user/plasma-login.service.d/ludus.conf
 
 getent group ludus >/dev/null || groupadd --system ludus
+getent group ludus-web >/dev/null || groupadd --system ludus-web
+id ludus-web >/dev/null 2>&1 || useradd --system -g ludus-web -M -s /usr/sbin/nologin ludus-web
+if [[ ! -e "$config_dir/webui.json" ]]; then
+  printf '%s\n' '{"auth_mode":"none","listen":"0.0.0.0","port":9876}' > "$config_dir/webui.json"
+  chown root:ludus-web "$config_dir/webui.json"; chmod 0640 "$config_dir/webui.json"
+fi
+[[ -e "$config_dir/libraries.conf" ]] || install -m 0644 /dev/null "$config_dir/libraries.conf"
 # Steam's normal per-user autostart races the Ludus launcher. Disable it
 # only for explicitly enrolled Ludus accounts; the custom session owns Steam.
 for user in $(getent group ludus | awk -F: '{print $4}' | tr ',' ' '); do
@@ -91,7 +114,13 @@ fi
 if ! grep -q 'plasmalogin-ludus' /etc/pam.d/plasmalogin; then
   sed -i '/^auth[[:space:]].*substack[[:space:]]*password-auth/i auth        include      plasmalogin-ludus' /etc/pam.d/plasmalogin
 fi
+# Mounting is handled by ludus-mount.service, requested by the selected user's
+# launcher before Steam starts. Keeping it out of PAM avoids xdm_t SELinux
+# restrictions while retaining a narrow, peer-credential-checked boundary.
+sed -i '\|ludus-steam-session-mount|d' /etc/pam.d/plasmalogin
 systemctl daemon-reload
 systemctl enable ludus.service
+systemctl enable --now ludus-mount.service
+systemctl enable --now ludus-backend.service ludus-web.service ludus-web-firewall.service
 echo "Ludus installed. Add intended users to ludus, then restart plasmalogin or reboot to activate it."
 echo "Backup: $backup"

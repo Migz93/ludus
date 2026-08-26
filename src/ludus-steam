@@ -15,6 +15,11 @@ for _ in $(seq 1 300); do
         [[ -n "$display" && -n "$authority" && -r "$authority" ]] || continue
         if DISPLAY="$display" XAUTHORITY="$authority" /usr/bin/xdpyinfo >/dev/null 2>&1; then
             export DISPLAY="$display" XAUTHORITY="$authority"
+            /usr/local/lib/ludus/ludus-mountctl mount
+            trap '/usr/local/lib/ludus/ludus-mountctl unmount || true' EXIT
+            # Register shared libraries while Steam is stopped.  The helper is
+            # deliberately unprivileged: it only writes this user's Steam VDF.
+            /usr/local/lib/ludus/ludus-steam-register-libraries || true
             /usr/bin/bazzite-steam steam://open/bigpicture &
             steam_pid=$!
             for _ in $(seq 1 450); do

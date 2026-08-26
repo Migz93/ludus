@@ -3,6 +3,7 @@ import QtQuick.Controls
 
 Rectangle {
     id: root
+    signal exitRequested()
     property bool failed: false
     property string displayName: "Player"
     gradient: Gradient {
@@ -50,5 +51,16 @@ Rectangle {
                 onAngleChanged: requestPaint()
             }
         }
+    }
+    Button {
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.top: parent.verticalCenter
+        anchors.topMargin: 152
+        visible: root.failed
+        text: "Exit to desktop"
+        onClicked: root.exitRequested()
+    }
+    Keys.onEscapePressed: {
+        if (root.failed) root.exitRequested()
     }
 }

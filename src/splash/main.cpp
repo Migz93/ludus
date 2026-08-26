@@ -40,6 +40,7 @@ int main(int argc, char **argv)
     QQuickView view;
     view.setResizeMode(QQuickView::SizeRootObjectToView);
     view.setSource(QUrl::fromLocalFile(QStringLiteral("/usr/local/lib/ludus/Splash.qml")));
+    QObject::connect(view.rootObject(), SIGNAL(exitRequested()), &app, SLOT(quit()));
     view.rootObject()->setProperty("displayName", displayName());
     auto *layerSurface = LayerShellQt::Window::get(&view);
     LayerShellQt::Window::Anchors anchors;

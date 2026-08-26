@@ -1,34 +1,15 @@
 #!/usr/bin/env bash
-# Open the WebUI only to the directly connected private IPv4 LAN.  Do not
-# guess at public or VPN networks: an administrator can configure those
-# explicitly if they ever become a supported deployment.
+# Expose only the Ludus WebUI port. Never assign sources to a zone.
 set -Eeuo pipefail
-
 port=9876
-zone=ludus
-
+state=/etc/ludus/webui-firewall-zone
 if ! firewall-cmd --state >/dev/null 2>&1; then
-    echo "ludus-web-firewall: firewalld is not active; WebUI LAN access was not opened" >&2
+    echo "ludus-web-firewall: firewalld is not active; no port was opened" >&2
     exit 0
 fi
-
-device=$(ip route show default | awk 'NR == 1 { for (i = 1; i <= NF; i++) if ($i == "dev") { print $(i + 1); exit } }')
-[[ -n "$device" ]] || { echo "ludus-web-firewall: no default-route device; WebUI LAN access was not opened" >&2; exit 0; }
-source_cidr=$(ip -o -4 addr show dev "$device" scope global | awk 'NR == 1 { print $4 }')
-[[ -n "$source_cidr" ]] || { echo "ludus-web-firewall: no IPv4 LAN address on $device; WebUI LAN access was not opened" >&2; exit 0; }
-
-address=${source_cidr%%/*}
-IFS=. read -r first second _ _ <<< "$address"
-private=false
-if [[ "$first" == 10 || "$first" == 192 && "$second" == 168 ]]; then
-    private=true
-elif [[ "$first" == 172 && "$second" =~ ^[0-9]+$ && $((10#$second)) -ge 16 && $((10#$second)) -le 31 ]]; then
-    private=true
-fi
-"$private" || { echo "ludus-web-firewall: $source_cidr is not a private LAN; WebUI LAN access was not opened" >&2; exit 0; }
-
-firewall-cmd --permanent --get-zones | tr ' ' '\n' | grep -qx "$zone" || firewall-cmd --permanent --new-zone="$zone"
-firewall-cmd --permanent --zone="$zone" --add-source="$source_cidr" >/dev/null
+zone=$(cat "$state" 2>/dev/null || firewall-cmd --get-default-zone)
 firewall-cmd --permanent --zone="$zone" --add-port="$port/tcp" >/dev/null
+install -d -m 0755 /etc/ludus
+printf '%s\n' "$zone" > "$state"
 firewall-cmd --reload
-echo "ludus-web-firewall: opened TCP $port only to $source_cidr"
+echo "ludus-web-firewall: opened only TCP $port in zone $zone"

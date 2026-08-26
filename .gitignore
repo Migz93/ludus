@@ -5,6 +5,8 @@ cmake-build-*/
 *.so
 *.a
 *.rcc
+__pycache__/
+*.py[cod]
 
 # Qt, editor, and OS metadata
 .qt/

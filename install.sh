@@ -68,10 +68,18 @@ install -m 0755 "$project_dir/src/ludus-steam" "$install_root/ludus-steam"
 install -m 0755 "$project_dir/src/ludusctl" "$install_root/ludusctl"
 install -m 0755 "$project_dir/src/ludus-disks.py" "$install_root/ludus-disks"
 install -m 0755 "$project_dir/src/ludus-steam-register-libraries" "$install_root/ludus-steam-register-libraries"
+install -m 0755 "$project_dir/src/ludus-steam-user-libraries.py" "$install_root/ludus-steam-user-libraries"
+install -m 0755 "$project_dir/src/ludus-storage.py" "$install_root/ludus-storage"
 install -m 0755 "$project_dir/src/ludus-mountd.py" "$install_root/ludus-mountd"
 install -m 0755 "$project_dir/src/ludus-mountctl.py" "$install_root/ludus-mountctl"
 install -m 0755 "$project_dir/src/ludus-backend.py" "$install_root/ludus-backend"
 install -m 0755 "$project_dir/src/ludus-web.py" "$install_root/ludus-web"
+# The WebUI reads these three fixed names once at start-up and serves one
+# self-contained page; no request path is ever mapped onto the filesystem.
+install -d -m 0755 "$install_root/web"
+install -m 0644 "$project_dir/src/web/index.html" "$install_root/web/index.html"
+install -m 0644 "$project_dir/src/web/app.css" "$install_root/web/app.css"
+install -m 0644 "$project_dir/src/web/app.js" "$install_root/web/app.js"
 cc -O2 -Wall -Wextra -o "$install_root/ludus-pam-auth" "$project_dir/src/ludus-pam-auth.c" -lpam
 install -m 0755 "$project_dir/src/ludus-web-firewall" "$install_root/ludus-web-firewall"
 ln -sfn "$install_root/ludusctl" /usr/local/bin/ludusctl
@@ -83,6 +91,20 @@ install -m 0644 "$project_dir/systemd/ludus-web-firewall.service" "$unit_dir/lud
 install -m 0644 "$project_dir/sessions/ludus.desktop" /usr/local/share/wayland-sessions/ludus.desktop
 install -m 0644 "$project_dir/config/plasmalogin-ludus.pam" /etc/pam.d/plasmalogin-ludus
 install -m 0644 "$project_dir/config/ludus-web.pam" /etc/pam.d/ludus-web
+checkmodule -M -m -o "$build_dir/ludus_vscode_ssh.mod" "$project_dir/selinux/ludus-vscode-ssh.te"
+semodule_package -o "$build_dir/ludus_vscode_ssh.pp" -m "$build_dir/ludus_vscode_ssh.mod"
+install -m 0644 "$build_dir/ludus_vscode_ssh.pp" "$install_root/ludus_vscode_ssh.pp"
+semodule -r ludus_vscode_ssh >/dev/null 2>&1 || true
+checkmodule -M -m -o "$build_dir/ludus_controller.mod" "$project_dir/selinux/ludus-controller.te"
+semodule_package -o "$build_dir/ludus_controller.pp" -m "$build_dir/ludus_controller.mod"
+install -m 0644 "$build_dir/ludus_controller.pp" "$install_root/ludus_controller.pp"
+semodule -i "$install_root/ludus_controller.pp"
+# Label only the bridge executable so systemd transitions this one service
+# into ludus_controller_t.  All other Ludus services retain their existing
+# domains and permissions.
+semanage fcontext -a -t ludus_controller_exec_t "$install_root/ludus-controller-bridge" 2>/dev/null \
+  || semanage fcontext -m -t ludus_controller_exec_t "$install_root/ludus-controller-bridge"
+restorecon -v "$install_root/ludus-controller-bridge"
 install -m 0644 "$project_dir/systemd/plasma-login.service.d/ludus.conf" /etc/systemd/user/plasma-login.service.d/ludus.conf
 
 getent group ludus >/dev/null || groupadd --system ludus

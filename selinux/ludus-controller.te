@@ -1,0 +1,29 @@
+module ludus_controller 1.0;
+
+require {
+    type init_t;
+    type input_device_t;
+    type proc_t;
+    type uinput_device_t;
+    class dir { getattr open read search };
+    class file { entrypoint execute getattr map open read };
+    class chr_file { getattr ioctl open read write };
+    class process transition;
+}
+
+# The bridge is deliberately a separate domain.  It only reads physical input
+# devices, creates its virtual keyboard through uinput, and reads /proc/*/comm
+# to avoid emitting keys outside the Plasma Login greeter.
+type ludus_controller_t;
+type ludus_controller_exec_t;
+
+allow init_t ludus_controller_exec_t:file { execute getattr map open read };
+allow init_t ludus_controller_t:process transition;
+type_transition init_t ludus_controller_exec_t:process ludus_controller_t;
+
+allow ludus_controller_t ludus_controller_exec_t:file { entrypoint execute getattr map open read };
+allow ludus_controller_t input_device_t:dir search;
+allow ludus_controller_t input_device_t:chr_file { getattr ioctl open read };
+allow ludus_controller_t uinput_device_t:chr_file { getattr ioctl open write };
+allow ludus_controller_t proc_t:dir { getattr open read search };
+allow ludus_controller_t proc_t:file { getattr open read };

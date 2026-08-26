@@ -8,8 +8,8 @@ import socket
 import stat
 import subprocess
 
-SOCKET = "/run/ludus/mount.sock"
-ACTIVE_USER = "/run/ludus/active-user"
+SOCKET = "/run/ludus-mount/mount.sock"
+ACTIVE_USER = "/run/ludus-mount/active-user"
 LIBRARIES = "/etc/ludus/libraries.conf"
 GROUP = "ludus"
 

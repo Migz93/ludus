@@ -21,7 +21,11 @@ if [[ -r /etc/ludus/libraries.conf ]]; then
 fi
 systemctl disable --now ludus.service ludus-mount.service ludus-backend.service ludus-web.service ludus-web-firewall.service 2>/dev/null || true
 if command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then
-  firewall-cmd --permanent --zone=ludus --remove-port=9876/tcp >/dev/null 2>&1 || true
+  if [[ -r /etc/ludus/webui-firewall-zone ]]; then
+    firewall-cmd --permanent --zone="$(cat /etc/ludus/webui-firewall-zone)" --remove-port=9876/tcp >/dev/null 2>&1 || true
+  fi
+  firewall-cmd --permanent --delete-zone=ludus >/dev/null 2>&1 || true
+  firewall-cmd --delete-zone=ludus >/dev/null 2>&1 || true
   firewall-cmd --reload >/dev/null 2>&1 || true
 fi
 rm -f /etc/systemd/system/plasmalogin.service.d/ludus.conf
@@ -31,6 +35,10 @@ rm -f /etc/systemd/system/ludus-mount.service
 rm -f /etc/systemd/system/ludus-backend.service
 rm -f /etc/systemd/system/ludus-web.service
 rm -f /etc/systemd/system/ludus-web-firewall.service
+rm -f /etc/ludus/webui-firewall-zone /etc/pam.d/ludus-web
+semodule -r ludus_vscode_ssh >/dev/null 2>&1 || true
+semodule -r ludus_controller >/dev/null 2>&1 || true
+semanage fcontext -d /usr/local/lib/ludus/ludus-controller-bridge >/dev/null 2>&1 || true
 rm -f /usr/local/share/wayland-sessions/ludus.desktop
 rm -f /etc/pam.d/plasmalogin-ludus
 if [[ -e /etc/ludus/created-pam-override ]]; then

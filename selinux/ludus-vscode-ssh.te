@@ -1,0 +1,10 @@
+module ludus_vscode_ssh 1.0;
+
+require {
+    type sshd_session_t;
+    type ephemeral_port_t;
+    class tcp_socket name_connect;
+}
+
+# Standard VS Code Remote SSH forwarding reaches a user-local ephemeral port.
+allow sshd_session_t ephemeral_port_t:tcp_socket name_connect;

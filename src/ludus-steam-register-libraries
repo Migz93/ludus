@@ -5,6 +5,7 @@
 set -Eeuo pipefail
 
 libraries_file=/etc/ludus/libraries.conf
+user_libraries=/usr/local/lib/ludus/ludus-steam-user-libraries
 if [[ ! -r "$libraries_file" ]]; then
     logger -t ludus-steam-register "no readable Ludus library configuration"
     exit 0
@@ -17,9 +18,25 @@ if [[ ! -f "${vdfs[0]}" && ! -f "${vdfs[1]}" ]]; then
     exit 0
 fi
 
+# Steam's own per-user library is mandatory: it contains the client and
+# account-specific data.  Keep it registered but mark it clearly so installs
+# go to the Ludus shared default instead.
+"$user_libraries" label-home-library "$(id -un)" || logger -t ludus-steam-register "could not label mandatory Steam library"
+
 add_library() {
-    local vdf=$1 library=$2 key tmp
+    local vdf=$1 library=$2 key tmp marker content_id label
     [[ -d "$library/steamapps" ]] || return 0
+    marker="$library/libraryfolder.vdf"
+    [[ -f "$marker" ]] || {
+        logger -t ludus-steam-register "not registering $library: Steam has not created libraryfolder.vdf yet"
+        return 0
+    }
+    content_id=$(awk -F'"' '$2 == "contentid" { print $4; exit }' "$marker")
+    label=$(awk -F'"' '$2 == "label" { print $4; exit }' "$marker")
+    [[ "$content_id" =~ ^[0-9]+$ && "$label" != *'"'* && "$label" != *'\\'* && "$label" != *$'\n'* && "$label" != *$'\r'* ]] || {
+        logger -t ludus-steam-register "not registering malformed Steam library marker: $marker"
+        return 0
+    }
     # Steam KeyValues quoting cannot safely represent these without a full VDF
     # parser.  Ludusctl already rejects newlines; reject the remaining ambiguous
     # delimiters rather than risking a malformed user configuration.
@@ -44,7 +61,7 @@ add_library() {
     # entries and append one complete Steam library record before it.
     cp -p "$vdf" "${vdf}.ludus.bak"
     sed '$d' "$vdf" > "$tmp"
-    printf '\t"%s"\n\t{\n\t\t"path"\t\t"%s"\n\t\t"label"\t\t""\n\t\t"contentid"\t\t"0"\n\t\t"totalsize"\t\t"0"\n\t\t"update_clean_bytes_tally"\t\t"0"\n\t\t"time_last_update_verified"\t\t"0"\n\t\t"apps"\n\t\t{\n\t\t}\n\t}\n}\n' "$key" "$library" >> "$tmp"
+    printf '\t"%s"\n\t{\n\t\t"path"\t\t"%s"\n\t\t"label"\t\t"%s"\n\t\t"contentid"\t\t"%s"\n\t\t"totalsize"\t\t"0"\n\t\t"update_clean_bytes_tally"\t\t"0"\n\t\t"time_last_update_verified"\t\t"0"\n\t\t"apps"\n\t\t{\n\t\t}\n\t}\n}\n' "$key" "$library" "$label" "$content_id" >> "$tmp"
     chmod --reference="$vdf" "$tmp"
     mv -f "$tmp" "$vdf"
     logger -t ludus-steam-register "registered $library in $vdf"

@@ -14,16 +14,23 @@ GROUP = "ludus-web"
 CTL = "/usr/local/bin/ludusctl"
 PAM_HELPER = "/usr/local/lib/ludus/ludus-pam-auth"
 WEB_CONFIG = "/etc/ludus/webui.json"
+VSCODE_POLICY = "/usr/local/lib/ludus/ludus_vscode_ssh.pp"
 READ = {
     "status": ["status"], "doctor": ["doctor"],
+    # Read-only structured reporting for the WebUI. Neither command changes
+    # any system state; both take no argument.
+    "doctor.json": ["doctor", "--json"],
+    "storage": ["storage"],
     "users.list": ["users", "list"],
-    "libraries.list": ["libraries", "list"], "libraries.candidates": ["libraries", "candidates"],
+    "users.personal_libraries": ["users", "personal-libraries"],
+    "libraries.list": ["libraries", "list"], "libraries.default": ["libraries", "default"], "libraries.candidates": ["libraries", "candidates"],
     "libraries.check": ["libraries", "check"],
     "disks.list": ["disks", "list"],
 }
 WRITE = {
     "users.enroll": ["users", "enroll"], "users.remove": ["users", "remove"],
-    "libraries.add": ["libraries", "add"], "libraries.add_default": ["libraries", "add-default"], "libraries.remove": ["libraries", "remove"],
+    "users.remove_personal_library": ["users", "remove-personal-library"],
+    "libraries.add": ["libraries", "add"], "libraries.add_default": ["libraries", "add-default"], "libraries.remove": ["libraries", "remove"], "libraries.set_default": ["libraries", "set-default"], "libraries.label": ["libraries", "label"],
     "libraries.repair": ["libraries", "repair"], "repair": ["repair"],
     "libraries.migrate": ["libraries", "migrate"],
     "disks.mount": ["disks", "mount"],
@@ -96,6 +103,17 @@ def set_authentication_mode(argument):
     write_config(config)
     return {"ok": True, "output": "WebUI authentication mode updated."}
 
+def set_vscode_forwarding(argument):
+    if not isinstance(argument, bool): raise RuntimeError("invalid VS Code setting")
+    if argument:
+        subprocess.run(["semodule", "-i", VSCODE_POLICY], check=True, timeout=30)
+    else:
+        subprocess.run(["semodule", "-r", "ludus_vscode_ssh"], check=False, timeout=30)
+    with open(WEB_CONFIG, encoding="utf-8") as config_file: config = json.load(config_file)
+    config["vscode_ssh_forwarding"] = argument
+    write_config(config)
+    return {"ok": True, "output": "VS Code Remote SSH forwarding setting updated."}
+
 def pam_authentication(argument):
     if not isinstance(argument, dict): raise RuntimeError("invalid PAM credentials")
     username, password = argument.get("username"), argument.get("password")
@@ -110,19 +128,49 @@ def dispatch(request):
     if operation == "webui.settings":
         with open(WEB_CONFIG, encoding="utf-8") as config_file:
             config = json.load(config_file)
-        return {"ok": True, "auth_mode": config.get("auth_mode", "none")}
+        # The username is not a secret (it is sent openly on every sign-in
+        # attempt); exposing it lets the WebUI pre-fill the credentials form.
+        # The password hash is never returned.
+        return {"ok": True, "auth_mode": config.get("auth_mode", "none"), "vscode_ssh_forwarding": config.get("vscode_ssh_forwarding", False), "username": config.get("username", "")}
     if operation == "webui.rotate":
         return rotate_credentials(request.get("argument"))
     if operation == "webui.disable_auth":
         return disable_authentication()
     if operation == "webui.set_auth_mode":
         return set_authentication_mode(request.get("argument"))
+    if operation == "webui.set_vscode_forwarding":
+        return set_vscode_forwarding(request.get("argument"))
     if operation == "webui.pam_auth":
         return pam_authentication(request.get("argument"))
     argv = READ.get(operation) or WRITE.get(operation)
     if not argv:
         raise RuntimeError("unsupported operation")
     argument = request.get("argument")
+    if operation == "disks.mount":
+        if not isinstance(argument, dict):
+            raise RuntimeError("invalid disk mount request")
+        path, mountpoint = argument.get("path"), argument.get("mountpoint", "/mnt/games")
+        if not isinstance(path, str) or not path or not isinstance(mountpoint, str) or not mountpoint:
+            raise RuntimeError("invalid disk mount request")
+        argv = [*argv, path, mountpoint]
+        completed = subprocess.run([CTL, *argv], text=True, capture_output=True, timeout=3600, check=False)
+        return {"ok": completed.returncode == 0, "output": completed.stdout, "error": completed.stderr}
+    if operation == "users.remove_personal_library":
+        if not isinstance(argument, dict): raise RuntimeError("invalid personal library removal request")
+        user, path = argument.get("user"), argument.get("path")
+        if not isinstance(user, str) or not user or not isinstance(path, str) or not path.startswith("/") or len(path) > 4096 or "\x00" in path:
+            raise RuntimeError("invalid personal library removal request")
+        completed = subprocess.run([CTL, *argv, user, path], text=True, capture_output=True, timeout=3600, check=False)
+        return {"ok": completed.returncode == 0, "output": completed.stdout, "error": completed.stderr}
+    if operation == "libraries.label":
+        if not isinstance(argument, dict): raise RuntimeError("invalid shared library label request")
+        path, label = argument.get("path"), argument.get("label")
+        if not isinstance(path, str) or not path.startswith("/") or len(path) > 4096 or "\x00" in path:
+            raise RuntimeError("invalid shared library path")
+        if not isinstance(label, str) or len(label) > 64 or any(character in label for character in ('\x00', '\n', '\r', '"', '\\')):
+            raise RuntimeError("invalid shared library label")
+        completed = subprocess.run([CTL, *argv, path, label], text=True, capture_output=True, timeout=3600, check=False)
+        return {"ok": completed.returncode == 0, "output": completed.stdout, "error": completed.stderr}
     needs_argument = operation in WRITE and operation not in {"libraries.repair", "repair"}
     if needs_argument:
         if not isinstance(argument, str) or not argument or len(argument) > 4096 or "\x00" in argument:

@@ -92,6 +92,14 @@ Item {
                     Image { anchors.fill: parent; source: card.icon; fillMode: Image.PreserveAspectCrop; asynchronous: true }
                 }
                 QQC2.Label { anchors.horizontalCenter: parent.horizontalCenter; y: 211; width: parent.width-20; horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight; text: card.realName.length ? card.realName : card.name; color: root.profileColour(card.loginName); font.pixelSize: 25; font.weight: Font.DemiBold }
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: {
+                        root.selectedIndex = card.index
+                        root.select()
+                    }
+                }
             }
         }
         Row {

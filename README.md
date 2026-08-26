@@ -10,6 +10,32 @@ Shared Steam libraries are a Phase 2 feature in progress.  They share installed
 files, not Steam ownership: every player still needs the relevant entitlement
 on their own Steam account to launch a game.
 
+## Shared Steam libraries
+
+Each player must retain Steam's mandatory library in their own home directory:
+`~/.local/share/Steam`. It contains the Steam client, account state, and other
+private data, so Ludus labels it **DO NOT USE** rather than removing it.
+
+Install games into a Ludus-managed shared library instead. Shared libraries use
+`root:ludus` ownership with group-write and setgid permissions, while their
+`steamapps/compatdata` and `steamapps/shadercache` paths are bind-mounted to
+the active player's private directories only for that player's session. Every
+parent directory of a shared library must also be traversable by all members of
+the `ludus` group; Ludus diagnostics check this.
+
+When creating a new shared library, Ludus creates Steam's
+`libraryfolder.vdf` marker with a unique positive numeric content ID, then
+registers the same path, ID, and optional label in every Steam-ready player's
+two `libraryfolders.vdf` files. Steam accepts this automatic setup; manually
+adding the path in Steam's Storage UI is not required. Library labels can be
+managed from the WebUI and are propagated to each Steam-ready player.
+
+Ludus records the administrator's preferred shared library in
+`/etc/ludus/default-library.conf`. Steam keeps the actual default install
+choice per player, so select that library in Steam's Storage UI for each
+Steam-ready player. Additional shared libraries remain available as alternate
+install locations.
+
 ## Phase 1 status
 
 This project has been tested on the Bazzite KDE VM with Plasma Login Manager and Wayland. It uses normal Bazzite Desktop Plasma—not the Bazzite Deck/Gaming Mode image—and launches `/usr/bin/bazzite-steam steam://open/bigpicture` inside the selected user's normal Plasma Wayland session.

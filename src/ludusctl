@@ -4,25 +4,68 @@ set -Eeuo pipefail
 
 config_dir=/etc/ludus
 libraries_file="$config_dir/libraries.conf"
+default_library_file="$config_dir/default-library.conf"
 group=ludus
 disks=/usr/local/lib/ludus/ludus-disks
+user_libraries=/usr/local/lib/ludus/ludus-steam-user-libraries
+storage_report=/usr/local/lib/ludus/ludus-storage
+steam_register=/usr/local/lib/ludus/ludus-steam-register-libraries
 
 die() { echo "ludusctl: $*" >&2; exit 1; }
 note() { echo "ludusctl: $*"; }
 require_root() { (( EUID == 0 )) || die "this operation must be run as root"; }
 
+# Diagnostics are emitted through report() so the same checks can be printed as
+# the long-standing "SEVERITY message" lines or as structured records.  The
+# human-readable text is the message field verbatim, so the two never diverge.
+doctor_json=false
+doctor_records=()
+
+report() { # severity code group subject data message
+    local severity=$1 code=$2 group=$3 subject=$4 data=$5 message=$6
+    if "$doctor_json"; then
+        doctor_records+=("$severity"$'\t'"$code"$'\t'"$group"$'\t'"${subject//$'\t'/ }"$'\t'"${data//$'\t'/ }"$'\t'"${message//$'\t'/ }")
+    else
+        printf '%s %s\n' "$severity" "$message"
+    fi
+}
+
+emit_doctor_json() {
+    (( ${#doctor_records[@]} )) || { echo '[]'; return; }
+    printf '%s\n' "${doctor_records[@]}" | python3 -c '
+import json, sys
+records = []
+for line in sys.stdin.read().split("\n"):
+    if not line:
+        continue
+    severity, code, group, subject, data, message = line.split("\t", 5)
+    fields = {}
+    for pair in data.split("|"):
+        if "=" in pair:
+            key, value = pair.split("=", 1)
+            fields[key] = value
+    records.append({"severity": severity, "code": code, "group": group,
+                    "subject": subject, "data": fields, "message": message})
+print(json.dumps(records))
+'
+}
+
 usage() {
     cat <<'EOF'
 Usage: ludusctl <command>
 
-  status | doctor
-  users list | users enroll <user> | users remove <user>
+  status | doctor [--json]
+  storage
+  users list | users personal-libraries | users remove-personal-library <user> <path>
+  users enroll <user> | users remove <user>
   libraries list | libraries candidates | libraries add <absolute-path>
   libraries add-default <mounted-path> | libraries remove <path>
+  libraries default | libraries set-default <configured-path>
+  libraries label <configured-path> <label>
   libraries migrate <configured-path> [--yes]
   libraries check | libraries repair
   repair
-  disks list | disks mount <unmounted-partition>
+  disks list | disks mount <unmounted-partition> [mount-point]
 EOF
 }
 
@@ -47,7 +90,57 @@ library_paths() {
     done < "$libraries_file"
 }
 
+default_library() { [[ -s "$default_library_file" ]] && head -n1 "$default_library_file" || true; }
+
 library_id() { printf '%s' "$1" | sha256sum | cut -c1-16; }
+
+library_label() {
+    local library=$1 marker="$1/libraryfolder.vdf"
+    [[ -f "$marker" ]] || return 0
+    awk -F'"' '$2 == "label" { print $4; exit }' "$marker"
+}
+
+valid_library_label() {
+    local label=$1
+    [[ ${#label} -le 64 && "$label" != *$'\n'* && "$label" != *$'\r'* && "$label" != *'"'* && "$label" != *'\\'* ]]
+}
+
+library_content_id() {
+    local library=$1 marker="$1/libraryfolder.vdf"
+    [[ -f "$marker" ]] || return 0
+    awk -F'"' '$2 == "contentid" { print $4; exit }' "$marker"
+}
+
+new_library_content_id() {
+    local candidate existing
+    command -v shuf >/dev/null || die "shuf is required to create a Steam library identifier"
+    while :; do
+        # Steam accepts a positive numeric ID stored locally in libraryfolder.vdf.
+        # Stay within signed 64-bit range and avoid an ID already used by Ludus.
+        candidate=$(shuf -i 1000000000000000000-8999999999999999999 -n 1)
+        existing=false
+        while IFS= read -r library; do
+            [[ "$(library_content_id "$library")" == "$candidate" ]] && { existing=true; break; }
+        done < <(library_paths)
+        "$existing" || { printf '%s\n' "$candidate"; return; }
+    done
+}
+
+ensure_library_marker() {
+    local library=$1 marker="$1/libraryfolder.vdf" content_id label
+    if [[ ! -e "$marker" ]]; then
+        content_id=$(new_library_content_id)
+        install -o root -g "$group" -m 0664 /dev/null "$marker"
+        printf '"libraryfolder"\n{\n\t"contentid"\t\t"%s"\n\t"label"\t\t""\n}\n' "$content_id" > "$marker"
+        chown root:"$group" "$marker"; chmod 0664 "$marker"; chmod a-s "$marker"
+        return
+    fi
+    [[ -f "$marker" ]] || die "$marker exists but is not a regular file"
+    content_id=$(library_content_id "$library"); label=$(library_label "$library")
+    [[ "$content_id" =~ ^[1-9][0-9]*$ ]] || die "$marker has no valid positive numeric content ID"
+    valid_library_label "$label" || die "$marker has an unsafe Steam library label"
+    chown root:"$group" "$marker"; chmod 0664 "$marker"; chmod a-s "$marker"
+}
 
 # A normal WebUI choice is a mounted local filesystem.  Keep the generated
 # game directory predictable, but do not create it until the administrator
@@ -87,7 +180,13 @@ steam_initialized_for() {
     home=$(user_home "$user")
     # loginusers.vdf is written only after Steam has accepted an account login.
     # This is the safe point at which Ludus may edit that user's VDF files.
-    runuser -u "$user" -- test -s "$home/.local/share/Steam/config/loginusers.vdf"
+    if (( EUID == 0 )); then
+        runuser -u "$user" -- test -s "$home/.local/share/Steam/config/loginusers.vdf"
+    elif [[ "$(id -un)" == "$user" ]]; then
+        test -s "$home/.local/share/Steam/config/loginusers.vdf"
+    else
+        return 1
+    fi
 }
 
 valid_user() {
@@ -104,6 +203,43 @@ steam_running_for() {
     local user=$1 uid
     uid=$(user_uid "$user")
     pgrep -u "$uid" -f '(^|/)(steam|steamwebhelper|bazzite-steam)( |$)' >/dev/null 2>&1
+}
+
+# ludus-steam is the wrapper that requests the private-data mount, launches
+# Steam, and waits for it; it is alive for the whole session, including the
+# window after mounting but before Steam itself becomes visible to pgrep.
+# steam_running_for alone would treat that window as "nobody playing" and
+# let reconcile_active_session below tear down a session that is still
+# legitimately starting.
+ludus_steam_running_for() {
+    local user=$1 uid
+    uid=$(user_uid "$user")
+    [[ -n "$uid" ]] || return 1
+    pgrep -u "$uid" -f '(^|/)ludus-steam( |$)' >/dev/null 2>&1
+}
+
+# ludus-steam's own EXIT trap is the only thing that normally clears the
+# active-session marker and unmounts the private binds; it only runs if the
+# script exits gracefully. A crash or a forced session end skips it and
+# leaves both stuck. Clear a marker that no longer has a matching process,
+# using the exact same unmount steps a normal sign-out performs, so a stale
+# marker never keeps player/library changes blocked or misreports as an
+# active session.
+reconcile_active_session() {
+    local active_user library target name
+    [[ -r /run/ludus-mount/active-user ]] || return 0
+    active_user=$(< /run/ludus-mount/active-user)
+    [[ -n "$active_user" ]] || return 0
+    steam_running_for "$active_user" && return 0
+    ludus_steam_running_for "$active_user" && return 0
+    while IFS= read -r library; do
+        for name in compatdata shadercache; do
+            target="$library/steamapps/$name"
+            mountpoint -q "$target" 2>/dev/null && umount "$target" 2>/dev/null
+        done
+    done < <(library_paths)
+    rm -f /run/ludus-mount/active-user 2>/dev/null
+    report WARNING session.reconciled private "$active_user" '' "cleared a stale session marker for $active_user; no matching Steam process was found"
 }
 
 assert_steam_stopped() {
@@ -139,14 +275,17 @@ prepare_user_private_dirs() {
 prepare_library() {
     local library=$1 apps target name user
     # Group permissions on the library itself are insufficient if one of its
-    # ancestors is private (for example /var/lib/ludus). Every enrolled player
-    # must be able to traverse the path before Steam can use it.
+    # ancestors is private (for example /var/lib/ludus). Validate only players
+    # who have completed their first Steam login; the rest are deliberately
+    # deferred until their Steam configuration exists.
     while IFS= read -r user; do
+        steam_initialized_for "$user" || continue
         runuser -u "$user" -- test -x "$library" || die "$user cannot traverse $library; choose a path accessible to all Ludus users"
     done < <(enrolled_users)
     apps="$library/steamapps"
     install -d -o root -g "$group" -m 2775 "$library" "$apps" \
         "$apps/common" "$apps/workshop"
+    ensure_library_marker "$library"
     for name in compatdata shadercache; do
         target="$apps/$name"
         if [[ -e "$target" && ! -d "$target" ]]; then
@@ -165,24 +304,39 @@ prepare_library() {
 }
 
 check_library() {
-    local library=$1 apps expected actual errors=0 name target
+    local library=$1 apps actual errors=0 name target user
     apps="$library/steamapps"
-    [[ -d "$library" ]] || { echo "ERROR library missing: $library"; return 1; }
+    [[ -d "$library" ]] || { report ERROR library.missing storage "$library" '' "library missing: $library"; return 1; }
     actual=$(stat -c '%U:%G %a' "$library")
-    [[ "$actual" == "root:$group 2775" ]] || { echo "WARNING $library permissions are $actual; expected root:$group 2775"; ((errors+=1)); }
+    [[ "$actual" == "root:$group 2775" ]] || { report WARNING library.permissions storage "$library" "actual=$actual|expected=root:$group 2775" "$library permissions are $actual; expected root:$group 2775"; ((errors+=1)); }
     for name in common workshop; do
-        [[ -d "$apps/$name" ]] || { echo "ERROR missing $apps/$name"; ((errors+=1)); }
+        [[ -d "$apps/$name" ]] || { report ERROR library.folder-missing storage "$apps/$name" "library=$library" "missing $apps/$name"; ((errors+=1)); }
     done
     for name in compatdata shadercache; do
         target="$apps/$name"
-        [[ -d "$target" ]] || { echo "ERROR missing private bind target $target"; ((errors+=1)); continue; }
+        [[ -d "$target" ]] || { report ERROR bind.missing private "$target" '' "missing private bind target $target"; ((errors+=1)); continue; }
         if [[ "$(findmnt -rn -o TARGET -T "$target" 2>/dev/null | head -n1)" == "$target" ]]; then
-            echo "WARNING $target has an active bind mount"
+            report WARNING bind.mounted private "$target" '' "$target has an active bind mount"
         else
             actual=$(stat -c '%U:%G %a' "$target")
-            [[ "$actual" == "root:root 0" ]] || { echo "ERROR $target permissions are $actual; expected root:root 0"; ((errors+=1)); }
+            [[ "$actual" == "root:root 0" ]] || { report ERROR bind.permissions private "$target" "actual=$actual" "$target permissions are $actual; expected root:root 0"; ((errors+=1)); }
         fi
     done
+    # The library itself can have perfect ownership while a parent mount point
+    # is private to one player. Test the complete traversal and write path for
+    # every enrolled player, which is the view Steam will actually have.
+    if (( EUID == 0 )); then
+        while IFS= read -r user; do
+            if runuser -u "$user" -- test -x "$library" && runuser -u "$user" -- test -w "$apps"; then
+                report HEALTHY library.user-access storage "$library" "user=$user" "$user can access the shared Steam library $library"
+            else
+                report ERROR library.user-inaccessible storage "$library" "user=$user" "$user cannot access the shared Steam library $library; check parent-directory ownership and permissions"
+                ((errors+=1))
+            fi
+        done < <(enrolled_users)
+    else
+        report WARNING library.access-unverified storage "$library" '' "cannot verify every enrolled player's access to $library without root privileges"
+    fi
     return "$errors"
 }
 
@@ -194,6 +348,9 @@ repair_library() {
     while IFS= read -r -d '' path; do chgrp "$group" "$path"; chmod g+rwX "$path"; done \
         < <(find "$library" -xdev \( -path "$apps/compatdata" -o -path "$apps/shadercache" \) -prune -o -print0)
     find "$library" -xdev -type d \( -path "$apps/compatdata" -o -path "$apps/shadercache" \) -prune -o -exec chmod g+s {} +
+    # A setgid library root can make the marker inherit a setgid bit. It is a
+    # regular metadata file, not a shared executable, so keep only group write.
+    chmod g-s "$library/libraryfolder.vdf" 2>/dev/null || true
 }
 
 manifest_install_dir() {
@@ -262,7 +419,7 @@ migrate_library() {
 }
 
 cmd_users() {
-    local action=${1:-} user=${2:-} library
+    local action=${1:-} user=${2:-} library path users=()
     case "$action" in
         list)
             while IFS=: read -r name _ uid _ _ home shell; do
@@ -275,13 +432,32 @@ cmd_users() {
                 fi
             done < <(getent passwd)
             ;;
+        personal-libraries)
+            require_root
+            while IFS= read -r user; do
+                steam_initialized_for "$user" && users+=("$user")
+            done < <(enrolled_users)
+            ((${#users[@]})) && "$user_libraries" list-many "${users[@]}" || echo '[]'
+            ;;
+        remove-personal-library)
+            require_root; path=${3:-}
+            [[ -n "$user" && -n "$path" ]] || die "usage: ludusctl users remove-personal-library <user> <path>"
+            valid_user "$user" && id -nG "$user" | grep -qw "$group" || die "not an enrolled Ludus user: $user"
+            steam_initialized_for "$user" || die "$user has not completed their first Steam login"
+            assert_steam_stopped
+            "$user_libraries" remove "$user" "$path"
+            ;;
         enroll)
             require_root; [[ -n "$user" ]] || die "usage: ludusctl users enroll <user>"
             valid_user "$user" || die "not an eligible local interactive user: $user"
             steam_running_for "$user" && die "Steam is running for $user. Ask them to sign out before enrolling them."
             assert_steam_stopped; ensure_config; ensure_group
             usermod -aG "$group" "$user"
-            while IFS= read -r library; do prepare_user_private_dirs "$user" "$library"; done < <(library_paths)
+            if steam_initialized_for "$user"; then
+                while IFS= read -r library; do prepare_user_private_dirs "$user" "$library"; done < <(library_paths)
+            else
+                note "deferred Steam library setup for $user until their first Steam login"
+            fi
             note "enrolled $user; they must sign out and sign back in before Steam can use group access"
             note "shared libraries are registered in Steam automatically when Ludus next launches it"
             ;;
@@ -292,14 +468,15 @@ cmd_users() {
             gpasswd -d "$user" "$group" >/dev/null 2>&1 || true
             note "removed $user from Ludus; no home-directory or game data was deleted"
             ;;
-        *) die "usage: ludusctl users list|enroll|remove" ;;
+        *) die "usage: ludusctl users list|personal-libraries|remove-personal-library|enroll|remove" ;;
     esac
 }
 
 cmd_libraries() {
     local action=${1:-} raw=${2:-} extra=${3:-} library found=false
     case "$action" in
-        list) library_paths | while IFS= read -r library; do printf '%s\t%s\n' "$(library_id "$library")" "$library"; done ;;
+        list) library_paths | while IFS= read -r library; do printf '%s\t%s\t%s\n' "$(library_id "$library")" "$library" "$(library_label "$library")"; done ;;
+        default) default_library ;;
         candidates) library_candidates ;;
         add)
             require_root; [[ -n "$raw" ]] || die "usage: ludusctl libraries add <absolute-path>"
@@ -307,7 +484,13 @@ cmd_libraries() {
             while IFS= read -r path; do [[ "$path" == "$library" ]] && die "library is already configured: $library"; done < <(library_paths)
             prepare_library "$library"
             printf '%s\n' "$library" >> "$libraries_file"
-            while IFS= read -r user; do prepare_user_private_dirs "$user" "$library"; done < <(enrolled_users)
+            while IFS= read -r user; do
+                if steam_initialized_for "$user"; then
+                    prepare_user_private_dirs "$user" "$library"
+                else
+                    note "deferred Steam library setup for $user until their first Steam login"
+                fi
+            done < <(enrolled_users)
             note "added shared library: $library; each user's Steam config is updated at their next Ludus launch"
             ;;
         add-default)
@@ -322,7 +505,30 @@ cmd_libraries() {
             tmp=$(mktemp "$config_dir/libraries.XXXXXX")
             while IFS= read -r path; do [[ "$path" == "$library" ]] || printf '%s\n' "$path" >> "$tmp"; done < <(library_paths)
             install -m 0644 "$tmp" "$libraries_file"; rm -f "$tmp"
+            [[ "$(default_library)" == "$library" ]] && rm -f "$default_library_file"
             note "removed $library from Ludus management; no games or private data were deleted"
+            ;;
+        set-default)
+            require_root; [[ -n "$raw" ]] || die "usage: ludusctl libraries set-default <configured-path>"
+            assert_steam_stopped; library=$(canonical_path "$raw")
+            while IFS= read -r path; do [[ "$path" == "$library" ]] && found=true; done < <(library_paths)
+            "$found" || die "library is not configured: $library"
+            tmp=$(mktemp "$config_dir/default-library.XXXXXX")
+            printf '%s\n' "$library" > "$tmp"; install -m 0644 "$tmp" "$default_library_file"; rm -f "$tmp"
+            note "recorded Ludus preferred shared library: $library; Steam's per-user default remains controlled by Steam's Storage UI"
+            ;;
+        label)
+            require_root; [[ -n "$raw" ]] || die "usage: ludusctl libraries label <configured-path> <label>"
+            assert_steam_stopped; library=$(canonical_path "$raw")
+            while IFS= read -r path; do [[ "$path" == "$library" ]] && found=true; done < <(library_paths)
+            "$found" || die "library is not configured: $library"
+            valid_library_label "$extra" || die "library labels must be at most 64 characters and cannot contain quotes, backslashes, or line breaks"
+            "$user_libraries" set-shared-library-label "$library" "$extra"
+            while IFS= read -r user; do
+                steam_initialized_for "$user" || continue
+                "$user_libraries" set-library-label "$user" "$library" "$extra"
+            done < <(enrolled_users)
+            note "updated shared Steam library label: $library"
             ;;
         check)
             local result=0; while IFS= read -r library; do check_library "$library" || result=1; done < <(library_paths); return "$result"
@@ -337,39 +543,110 @@ cmd_libraries() {
             "$found" || die "library is not configured: $library"
             migrate_library "$library" "$extra"
             ;;
-        *) die "usage: ludusctl libraries list|candidates|add|add-default|remove|check|repair|migrate" ;;
+        *) die "usage: ludusctl libraries list|candidates|add|add-default|remove|default|set-default|label|check|repair|migrate" ;;
     esac
 }
 
 cmd_doctor() {
-    local result=0 user service
-    getent group "$group" >/dev/null && echo "HEALTHY group $group exists" || { echo "ERROR group $group is missing"; result=1; }
-    [[ -x /usr/bin/bazzite-steam ]] && echo "HEALTHY Bazzite Steam launcher found" || { echo "ERROR /usr/bin/bazzite-steam is missing"; result=1; }
-    [[ -f "$libraries_file" ]] && echo "HEALTHY library configuration found" || echo "WARNING no shared libraries configured"
+    local result=0 user service library name target active_user='' mount_info source fstype expected actual zone records severity code subject data message
+    [[ "${1:-}" == --json ]] && doctor_json=true
+    reconcile_active_session
+    getent group "$group" >/dev/null && report HEALTHY group.present services "$group" '' "group $group exists" || { report ERROR group.missing services "$group" '' "group $group is missing"; result=1; }
+    [[ -x /usr/bin/bazzite-steam ]] && report HEALTHY steam-launcher.present services /usr/bin/bazzite-steam '' "Bazzite Steam launcher found" || { report ERROR steam-launcher.missing services /usr/bin/bazzite-steam '' "/usr/bin/bazzite-steam is missing"; result=1; }
+    [[ -f "$libraries_file" ]] && report HEALTHY library-config.present services "$libraries_file" '' "library configuration found" || report WARNING library-config.absent services "$libraries_file" '' "no shared libraries configured"
     for service in ludus.service ludus-mount.service ludus-backend.service ludus-web.service ludus-web-firewall.service; do
         if systemctl is-active --quiet "$service"; then
-            echo "HEALTHY $service is active"
+            report HEALTHY service.active services "$service" '' "$service is active"
         elif systemctl is-enabled --quiet "$service" 2>/dev/null; then
-            echo "WARNING $service is enabled but inactive"
+            report WARNING service.inactive services "$service" '' "$service is enabled but inactive"
         else
-            echo "WARNING $service is not enabled"
+            report WARNING service.disabled services "$service" '' "$service is not enabled"
         fi
     done
-    [[ -S /run/ludus/mount.sock ]] && echo "HEALTHY mount control socket exists" || { echo "WARNING mount control socket is unavailable"; result=1; }
-    [[ -S /run/ludus/backend.sock ]] && echo "HEALTHY WebUI backend socket exists" || echo "WARNING WebUI backend socket is unavailable"
-    [[ -r /etc/ludus/webui.json ]] && echo "HEALTHY WebUI credential configuration found" || echo "WARNING WebUI credential configuration is unavailable"
+    [[ -S /run/ludus-mount/mount.sock ]] && report HEALTHY mount-socket.present services /run/ludus-mount/mount.sock '' "mount control socket exists" || { report WARNING mount-socket.absent services /run/ludus-mount/mount.sock '' "mount control socket is unavailable"; result=1; }
+    [[ -S /run/ludus/backend.sock ]] && report HEALTHY backend-socket.present services /run/ludus/backend.sock '' "WebUI backend socket exists" || report WARNING backend-socket.absent services /run/ludus/backend.sock '' "WebUI backend socket is unavailable"
+    [[ -r /etc/ludus/webui.json ]] && report HEALTHY webui-config.present services /etc/ludus/webui.json '' "WebUI credential configuration found" || report WARNING webui-config.absent services /etc/ludus/webui.json '' "WebUI credential configuration is unavailable"
     if command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then
-        firewall-cmd --zone=ludus --query-port=9876/tcp >/dev/null 2>&1 && echo "HEALTHY WebUI firewall port is limited to the Ludus zone" || echo "WARNING WebUI firewall port is not open in the Ludus zone"
+        zone=$(cat /etc/ludus/webui-firewall-zone 2>/dev/null || true)
+        if [[ -z "$zone" ]]; then
+            report WARNING firewall.zone-unrecorded network '' '' "WebUI firewall zone has not been recorded"
+        elif firewall-cmd --zone="$zone" --query-port=9876/tcp >/dev/null 2>&1; then
+            report HEALTHY firewall.open network "$zone" 'port=9876/tcp' "WebUI port 9876/tcp is open in active zone $zone"
+        else
+            report WARNING firewall.closed network "$zone" 'port=9876/tcp' "WebUI port 9876/tcp is not open in recorded zone $zone"
+        fi
     else
-        echo "WARNING firewalld is unavailable; WebUI LAN access could not be constrained"
+        report WARNING firewall.unavailable network '' '' "firewalld is unavailable; WebUI LAN access could not be constrained"
     fi
+    if [[ -r /run/ludus-mount/active-user ]]; then active_user=$(< /run/ludus-mount/active-user); fi
+    [[ -z "$active_user" ]] && report HEALTHY session.idle private '' '' "no Ludus player session has private binds active" || report HEALTHY session.active private "$active_user" '' "private binds are active for $active_user"
+    while IFS= read -r library; do
+        mount_info=$(findmnt -rn -o SOURCE,FSTYPE -T "$library" 2>/dev/null || true)
+        if [[ -n "$mount_info" ]]; then
+            read -r source fstype <<< "$mount_info"
+            report HEALTHY library.mounted storage "$library" "device=$source|fstype=$fstype" "library mount $library: $source ($fstype)"
+        else
+            report ERROR library.unresolved storage "$library" '' "library mount cannot be resolved: $library"; result=1
+        fi
+        for name in compatdata shadercache; do
+            target="$library/steamapps/$name"
+            if mountpoint -q "$target"; then
+                # For a bind on Btrfs, SOURCE contains the backing device plus
+                # the subvolume path; FSROOT is the actual private bind source.
+                source=$(findmnt -rn -o FSROOT -T "$target" 2>/dev/null || true)
+                if [[ -n "$active_user" ]] && valid_user "$active_user"; then
+                    expected=$(private_dir "$active_user" "$library" "$name")
+                    [[ "$source" == "$expected" ]] && report HEALTHY bind.correct private "$target" "library=$library|source=$source" "private bind $target -> $source" || { report ERROR bind.wrong-target private "$target" "library=$library|source=$source|expected=$expected" "private bind $target points to $source; expected $expected"; result=1; }
+                else
+                    report WARNING bind.unclaimed private "$target" "library=$library|source=$source" "private bind $target is active ($source), but no valid active player is recorded"
+                fi
+            else
+                actual=$(stat -c '%U:%G %a' "$target" 2>/dev/null || true)
+                [[ "$actual" == 'root:root 0' ]] && report HEALTHY bind.locked private "$target" "library=$library" "private bind target $target is locked while idle" || { report ERROR bind.unlocked private "$target" "library=$library|actual=${actual:-missing}" "private bind target $target is not locked (found ${actual:-missing})"; result=1; }
+            fi
+        done
+    done < <(library_paths)
     cmd_libraries check || result=1
-    while IFS= read -r user; do valid_user "$user" || { echo "ERROR enrolled user is no longer eligible: $user"; result=1; }; done < <(enrolled_users)
+    while IFS= read -r user; do
+        valid_user "$user" || { report ERROR player.ineligible steam "$user" '' "enrolled user is no longer eligible: $user"; result=1; continue; }
+        if steam_running_for "$user"; then report WARNING steam.running steam "$user" '' "Steam is running for $user"; else report HEALTHY steam.stopped steam "$user" '' "Steam is stopped for $user"; fi
+        if steam_initialized_for "$user"; then
+            if "$doctor_json"; then
+                records=$("$user_libraries" check-records "$user") || result=1
+                while IFS=$'\t' read -r severity code subject data message; do
+                    [[ -n "$severity" ]] && report "$severity" "$code" steam "$subject" "$data" "$message"
+                done <<< "$records"
+            else
+                "$user_libraries" check "$user" || result=1
+            fi
+        else
+            report WARNING steam.deferred steam "$user" '' "Steam registration deferred for $user until their first Steam login"
+        fi
+    done < <(enrolled_users)
+    if command -v getenforce >/dev/null 2>&1; then
+        case "$(getenforce)" in
+            Enforcing) report HEALTHY selinux.enforcing security '' '' "SELinux is enforcing" ;;
+            Permissive) report WARNING selinux.permissive security '' '' "SELinux is permissive" ;;
+            *) report WARNING selinux.disabled security '' '' "SELinux is disabled" ;;
+        esac
+        if semodule -l 2>/dev/null | awk '$1 == "ludus_controller" { found=1 } END { exit !found }'; then
+            actual=$(ls -Zd /usr/local/lib/ludus/ludus-controller-bridge 2>/dev/null | awk '{print $1}')
+            [[ "$actual" == *:ludus_controller_exec_t:* ]] && report HEALTHY selinux.controller-ok security ludus_controller "label=$actual" "controller SELinux policy and executable label are installed" || { report ERROR selinux.controller-mislabelled security ludus_controller "label=${actual:-missing}" "controller executable SELinux label is ${actual:-missing}"; result=1; }
+        else
+            report ERROR selinux.controller-missing security ludus_controller '' "controller SELinux policy is not installed"; result=1
+        fi
+    else
+        report WARNING selinux.unavailable security '' '' "SELinux tools are unavailable; controller policy could not be checked"
+    fi
+    if "$doctor_json"; then emit_doctor_json; fi
     return "$result"
 }
 
+cmd_storage() { "$storage_report"; }
+
 case "${1:-}" in
-    status|doctor) cmd_doctor ;;
+    status|doctor) shift; cmd_doctor "$@" ;;
+    storage) cmd_storage ;;
     users) shift; cmd_users "$@" ;;
     libraries) shift; cmd_libraries "$@" ;;
     repair) shift; cmd_libraries repair "$@" ;;

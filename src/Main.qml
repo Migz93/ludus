@@ -14,7 +14,6 @@ Item {
     readonly property int cardWidth: 250
     readonly property int cardHeight: 286
     readonly property int count: list.count
-    property var profileColours: ["#75a6ff", "#b28cff", "#65d6bd", "#ffae70", "#f58ab7"]
     focus: true
     function move(delta) {
         if (loggingIn) return
@@ -35,11 +34,6 @@ Item {
             if (powerIndex === 0) PlasmaLogin.SessionManagement.requestShutdown(PlasmaLogin.SessionManagement.ConfirmationMode.Skip)
             else PlasmaLogin.SessionManagement.requestReboot(PlasmaLogin.SessionManagement.ConfirmationMode.Skip)
         } else select()
-    }
-    function profileColour(loginName) {
-        let hash = 0
-        for (let i = 0; i < loginName.length; ++i) hash = ((hash * 31) + loginName.charCodeAt(i)) & 0x7fffffff
-        return profileColours[hash % profileColours.length]
     }
     Keys.onLeftPressed: move(-1)
     Keys.onRightPressed: move(1)
@@ -81,20 +75,34 @@ Item {
                 property string loginName: name
                 property bool selected: root.selectedIndex === index
                 width: root.cardWidth; height: root.cardHeight
-                Rectangle {
-                    anchors.fill: parent; anchors.margins: -8; radius: 28
-                    visible: card.selected; color: "transparent"
-                    border.width: 3; border.color: "#79caff"
-                    opacity: .95
+                Item {
+                    anchors.fill: parent; anchors.margins: -8
+                    visible: card.selected
+                    Rectangle {
+                        anchors.fill: parent; radius: 30; color: "transparent"
+                        border.width: 2; border.color: "#9ed9ff"; opacity: .5
+                        SequentialAnimation on opacity {
+                            running: card.selected
+                            loops: Animation.Infinite
+                            NumberAnimation { to: .12; duration: 850; easing.type: Easing.InOutSine }
+                            NumberAnimation { to: .62; duration: 850; easing.type: Easing.InOutSine }
+                        }
+                    }
                 }
                 Rectangle { anchors.fill: parent; radius: 22; color: card.selected ? "#1d3552" : "#172235"; border.width: card.selected ? 3 : 1; border.color: card.selected ? "#79caff" : "#30445d" }
                 Rectangle { id: circle; width: 166; height: 166; radius: width/2; anchors.horizontalCenter: parent.horizontalCenter; y: 25; color: "#36516f"; clip: true
                     Image { anchors.fill: parent; source: card.icon; fillMode: Image.PreserveAspectCrop; asynchronous: true }
                 }
-                QQC2.Label { anchors.horizontalCenter: parent.horizontalCenter; y: 211; width: parent.width-20; horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight; text: card.realName.length ? card.realName : card.name; color: root.profileColour(card.loginName); font.pixelSize: 25; font.weight: Font.DemiBold }
+                QQC2.Label { anchors.horizontalCenter: parent.horizontalCenter; y: 211; width: parent.width-20; horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight; text: card.realName.length ? card.realName : card.name; color: "#75a6ff"; font.pixelSize: 25; font.weight: Font.DemiBold }
                 MouseArea {
                     anchors.fill: parent
                     cursorShape: Qt.PointingHandCursor
+                    hoverEnabled: true
+                    onEntered: {
+                        if (root.loggingIn) return
+                        root.powerFocused = false
+                        root.selectedIndex = card.index
+                    }
                     onClicked: {
                         root.selectedIndex = card.index
                         root.select()

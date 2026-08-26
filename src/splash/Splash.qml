@@ -53,11 +53,29 @@ Rectangle {
         }
     }
     Button {
+        id: exitButton
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.top: parent.verticalCenter
-        anchors.topMargin: 152
+        anchors.topMargin: 166
+        width: 312
+        height: 64
         visible: root.failed
         text: "Exit to desktop"
+        font.pixelSize: 20
+        font.weight: Font.DemiBold
+        contentItem: Text {
+            text: exitButton.text
+            font: exitButton.font
+            color: "#f5f8ff"
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+        }
+        background: Rectangle {
+            radius: 12
+            color: exitButton.down ? "#2e5b9e" : (exitButton.hovered ? "#3f76c4" : "#315f9f")
+            border.width: 1
+            border.color: "#75a6ff"
+        }
         onClicked: root.exitRequested()
     }
     Keys.onEscapePressed: {

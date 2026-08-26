@@ -32,7 +32,6 @@ WRITE = {
     "users.remove_personal_library": ["users", "remove-personal-library"],
     "libraries.add": ["libraries", "add"], "libraries.add_default": ["libraries", "add-default"], "libraries.remove": ["libraries", "remove"], "libraries.set_default": ["libraries", "set-default"], "libraries.label": ["libraries", "label"],
     "libraries.repair": ["libraries", "repair"], "repair": ["repair"],
-    "libraries.migrate": ["libraries", "migrate"],
     "disks.mount": ["disks", "mount"],
 }
 
@@ -176,8 +175,6 @@ def dispatch(request):
         if not isinstance(argument, str) or not argument or len(argument) > 4096 or "\x00" in argument:
             raise RuntimeError("invalid argument")
         argv = [*argv, argument]
-    if operation == "libraries.migrate":
-        argv.append("--yes")
     completed = subprocess.run([CTL, *argv], text=True, capture_output=True, timeout=3600, check=False)
     return {"ok": completed.returncode == 0, "output": completed.stdout, "error": completed.stderr}
 

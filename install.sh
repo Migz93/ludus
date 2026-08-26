@@ -29,7 +29,7 @@ fi
 # A deployment reboot is required before any login configuration is changed.
 # Complete upstream Plasma Login build closure on Fedora/Bazzite 44.
 # Keep this list together so a fresh install needs only one deployment reboot.
-needed=(rpm-build cmake ninja-build pam-devel systemd-devel libXau-devel qt6-qtbase-devel qt6-qtdeclarative-devel qt6-qtshadertools-devel extra-cmake-modules kf6-kconfig-devel kf6-kcoreaddons-devel kf6-kpackage-devel kf6-kwindowsystem-devel kf6-ki18n-devel kf6-kdbusaddons-devel kf6-kcmutils-devel kf6-kauth-devel kf6-kio-devel libplasma-devel libkscreen-devel plasma-workspace-devel layer-shell-qt-devel)
+needed=(git-core gcc checkpolicy policycoreutils-python-utils rpm-build cmake ninja-build pam-devel systemd-devel libXau-devel qt6-qtbase-devel qt6-qtdeclarative-devel qt6-qtshadertools-devel extra-cmake-modules kf6-kconfig-devel kf6-kcoreaddons-devel kf6-kpackage-devel kf6-kwindowsystem-devel kf6-ki18n-devel kf6-kdbusaddons-devel kf6-kcmutils-devel kf6-kauth-devel kf6-kio-devel libplasma-devel libkscreen-devel plasma-workspace-devel layer-shell-qt-devel)
 missing=()
 for package in "${needed[@]}"; do rpm -q "$package" &>/dev/null || missing+=("$package"); done
 if ((${#missing[@]})); then
@@ -108,8 +108,14 @@ restorecon -v "$install_root/ludus-controller-bridge"
 install -m 0644 "$project_dir/systemd/plasma-login.service.d/ludus.conf" /etc/systemd/user/plasma-login.service.d/ludus.conf
 
 getent group ludus >/dev/null || groupadd --system ludus
-getent group ludus-web >/dev/null || groupadd --system ludus-web
-id ludus-web >/dev/null 2>&1 || useradd --system -g ludus-web -M -s /usr/sbin/nologin ludus-web
+if ! getent group ludus-web >/dev/null; then
+  groupadd --system ludus-web
+  : > "$config_dir/created-ludus-web-group"
+fi
+if ! id ludus-web >/dev/null 2>&1; then
+  useradd --system -g ludus-web -M -s /usr/sbin/nologin ludus-web
+  : > "$config_dir/created-ludus-web-user"
+fi
 if [[ ! -e "$config_dir/webui.json" ]]; then
   printf '%s\n' '{"auth_mode":"none","listen":"0.0.0.0","port":9876}' > "$config_dir/webui.json"
   chown root:ludus-web "$config_dir/webui.json"; chmod 0640 "$config_dir/webui.json"
@@ -117,16 +123,31 @@ fi
 [[ -e "$config_dir/libraries.conf" ]] || install -m 0644 /dev/null "$config_dir/libraries.conf"
 # Steam's normal per-user autostart races the Ludus launcher. Disable it
 # only for explicitly enrolled Ludus accounts; the custom session owns Steam.
+autostart_state="$config_dir/steam-autostart-users"
+autostart_backups="$config_dir/steam-autostart-backups"
+install -d -m 0700 "$autostart_backups"
 for user in $(getent group ludus | awk -F: '{print $4}' | tr ',' ' '); do
   home_dir=$(getent passwd "$user" | cut -d: -f6)
   [[ -n "$home_dir" && -d "$home_dir" ]] || continue
   install -d -o "$user" -g "$(id -gn "$user")" -m 0755 "$home_dir/.config/autostart"
-  if [[ -f "$home_dir/.config/autostart/steam.desktop" ]] && ! grep -q '^Hidden=true$' "$home_dir/.config/autostart/steam.desktop"; then
-    install -D -m 0600 "$home_dir/.config/autostart/steam.desktop" "$backup$home_dir/.config/autostart/steam.desktop"
+  autostart_file="$home_dir/.config/autostart/steam.desktop"
+  if ! grep -Fqx "$user"$'\t'"$home_dir" "$autostart_state" 2>/dev/null; then
+    # Preserve the original exactly once.  A prior Ludus version kept this
+    # only in its timestamped install backup, so import that copy on upgrade.
+    legacy_backup=$(find /var/lib/ludus/backups -type f ! -path "$backup/*" -path "*/${home_dir#/}/.config/autostart/steam.desktop" -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -n 1 | cut -d' ' -f2- || true)
+    if [[ -n "$legacy_backup" && -f "$legacy_backup" ]] && grep -Fqx 'Hidden=true' "$autostart_file" 2>/dev/null; then
+      install -d -m 0700 "$autostart_backups/$user"
+      cp -a -- "$legacy_backup" "$autostart_backups/$user/steam.desktop"
+    elif [[ -f "$autostart_file" ]]; then
+      install -D -m 0600 "$autostart_file" "$backup$home_dir/.config/autostart/steam.desktop"
+      install -d -m 0700 "$autostart_backups/$user"
+      cp -a -- "$autostart_file" "$autostart_backups/$user/steam.desktop"
+    fi
+    printf '%s\t%s\n' "$user" "$home_dir" >> "$autostart_state"
   fi
-  printf '%s\n' '[Desktop Entry]' 'Hidden=true' > "$home_dir/.config/autostart/steam.desktop"
-  chown "$user:$(id -gn "$user")" "$home_dir/.config/autostart/steam.desktop"
-  chmod 0644 "$home_dir/.config/autostart/steam.desktop"
+  printf '%s\n' '[Desktop Entry]' 'Hidden=true' > "$autostart_file"
+  chown "$user:$(id -gn "$user")" "$autostart_file"
+  chmod 0644 "$autostart_file"
 done
 # Insert an idempotent, narrowly scoped PAM include before password-auth.
 if [[ ! -e /etc/pam.d/plasmalogin ]]; then

@@ -62,7 +62,6 @@ Usage: ludusctl <command>
   libraries add-default <mounted-path> | libraries remove <path>
   libraries default | libraries set-default <configured-path>
   libraries label <configured-path> <label>
-  libraries migrate <configured-path> [--yes]
   libraries check | libraries repair
   repair
   disks list | disks mount <unmounted-partition> [mount-point]
@@ -72,6 +71,52 @@ EOF
 ensure_config() {
     install -d -m 0755 "$config_dir"
     [[ -e "$libraries_file" ]] || install -m 0644 /dev/null "$libraries_file"
+}
+
+disable_steam_autostart() {
+    # Steam's desktop autostart would race the Ludus session launcher.  Record
+    # exactly which account we changed so uninstall can restore its original
+    # file (or remove the file if Ludus created it).
+    local user=$1 home_dir autostart_file state backups
+    home_dir=$(getent passwd "$user" | cut -d: -f6)
+    [[ -n "$home_dir" && -d "$home_dir" ]] || die "cannot find a home directory for $user"
+    state="$config_dir/steam-autostart-users"
+    backups="$config_dir/steam-autostart-backups"
+    install -d -m 0700 "$backups"
+    install -d -o "$user" -g "$(id -gn "$user")" -m 0755 "$home_dir/.config/autostart"
+    autostart_file="$home_dir/.config/autostart/steam.desktop"
+    if ! grep -Fqx "$user"$'\t'"$home_dir" "$state" 2>/dev/null; then
+        if [[ -f "$autostart_file" ]]; then
+            install -d -m 0700 "$backups/$user"
+            cp -a -- "$autostart_file" "$backups/$user/steam.desktop"
+        fi
+        printf '%s\t%s\n' "$user" "$home_dir" >> "$state"
+    fi
+    printf '%s\n' '[Desktop Entry]' 'Hidden=true' > "$autostart_file"
+    chown "$user:$(id -gn "$user")" "$autostart_file"
+    chmod 0644 "$autostart_file"
+}
+
+restore_steam_autostart() {
+    local user=$1 home_dir autostart_file state backups preserved temporary
+    home_dir=$(getent passwd "$user" | cut -d: -f6)
+    [[ -n "$home_dir" && -d "$home_dir" ]] || return 0
+    state="$config_dir/steam-autostart-users"
+    backups="$config_dir/steam-autostart-backups"
+    grep -Fqx "$user"$'\t'"$home_dir" "$state" 2>/dev/null || return 0
+    autostart_file="$home_dir/.config/autostart/steam.desktop"
+    preserved="$backups/$user/steam.desktop"
+    if [[ -f "$preserved" ]]; then
+        install -d -o "$user" -g "$(id -gn "$user")" -m 0755 "$home_dir/.config/autostart"
+        cp -a -- "$preserved" "$autostart_file"
+    else
+        rm -f "$autostart_file"
+    fi
+    temporary=$(mktemp "$state.XXXXXX")
+    awk -F '\t' -v user="$user" -v home="$home_dir" '$1 != user || $2 != home { print }' "$state" > "$temporary"
+    chmod 0600 "$temporary"
+    mv -f "$temporary" "$state"
+    rm -rf -- "$backups/$user"
 }
 
 canonical_path() {
@@ -263,15 +308,33 @@ private_dir() {
 }
 
 prepare_user_private_dirs() {
-    local user=$1 library=$2 name dir
+    local user=$1 library=$2 name dir home primary_group parent
+    home=$(user_home "$user")
+    primary_group=$(user_primary_group "$user")
+    # install -d assigns ownership only to the final component.  Create these
+    # standard per-user parents explicitly so a first-time Steam user never
+    # receives root-owned ~/.local/share and cannot bootstrap the client.
+    for parent in "$home/.local" "$home/.local/share" "$home/.local/share/ludus" "$home/.local/share/ludus/steam-libraries"; do
+        [[ ! -L "$parent" ]] || die "$parent must not be a symlink"
+        if [[ -e "$parent" ]]; then
+            [[ -d "$parent" ]] || die "$parent exists but is not a directory"
+            # These are per-user paths.  Correct a root-owned intermediate
+            # left by an older Ludus install without changing the user's mode.
+            chown "$user:$primary_group" "$parent"
+        elif [[ "$parent" == "$home/.local/share/ludus" || "$parent" == "$home/.local/share/ludus/steam-libraries" ]]; then
+            install -d -o "$user" -g "$primary_group" -m 0700 "$parent"
+        else
+            install -d -o "$user" -g "$primary_group" -m 0755 "$parent"
+        fi
+    done
     for name in compatdata shadercache; do
         dir=$(private_dir "$user" "$library" "$name")
-        install -d -o "$user" -g "$(user_primary_group "$user")" -m 0700 "$dir"
+        install -d -o "$user" -g "$primary_group" -m 0700 "$dir"
     done
 }
 
 # The private bind targets must be empty because changing a populated target
-# would silently hide data.  A migration workflow will handle that explicitly.
+# would silently hide player data.
 prepare_library() {
     local library=$1 apps target name user
     # Group permissions on the library itself are insufficient if one of its
@@ -292,7 +355,7 @@ prepare_library() {
             die "$target exists but is not a directory"
         fi
         if [[ -d "$target" ]] && find "$target" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
-            die "$target contains existing data; migration is required before Ludus can make it private"
+            die "$target contains existing data; choose an empty shared-library directory"
         fi
         install -d -o root -g root -m 000 "$target"
         # A setgid parent can cause new directories to inherit its setgid bit
@@ -353,71 +416,6 @@ repair_library() {
     chmod g-s "$library/libraryfolder.vdf" 2>/dev/null || true
 }
 
-manifest_install_dir() {
-    sed -n 's/.*"installdir"[[:space:]]*"\([^"]*\)".*/\1/p' "$1" | head -n1
-}
-
-confirm_migration() {
-    local library=$1 answer
-    echo "Migration will move eligible installed game files into $library."
-    echo "Steam is stopped, but source game copies and matching manifests will be removed only after rsync checksum verification."
-    [[ "${2:-}" == --yes ]] && return 0
-    [[ -t 0 ]] || die "migration needs --yes when run non-interactively"
-    read -r -p 'Continue? [y/N] ' answer
-    [[ "$answer" =~ ^[Yy]$ ]] || die "migration cancelled"
-}
-
-# Move only unambiguous, complete game directories. Existing destination data or
-# conflicting manifests are reported and left untouched for a future explicit
-# resolution workflow. rsync's checksum dry run completes before source removal.
-migrate_library() {
-    local library=$1 confirmation=${2:-} apps user home source game name dest manifest target_manifest
-    local migrated=0 skipped=0
-    require_root; command -v rsync >/dev/null || die "rsync is required for migration"
-    assert_steam_stopped; prepare_library "$library"; confirm_migration "$library" "$confirmation"
-    apps="$library/steamapps"
-    while IFS= read -r user; do
-        home=$(user_home "$user")
-        source="$home/.local/share/Steam/steamapps"
-        [[ -d "$source/common" ]] || continue
-        while IFS= read -r -d '' game; do
-            name=$(basename "$game"); dest="$apps/common/$name"
-            if [[ -e "$dest" ]]; then
-                note "migration skipped $user/$name: destination already exists"
-                ((skipped+=1)); continue
-            fi
-            note "migrating $user/$name"
-            rsync -aHAX -- "$game/" "$dest/"
-            if rsync -aHAXnc --delete --dry-run -- "$game/" "$dest/" | grep -q .; then
-                note "migration retained source $user/$name: checksum verification did not match"
-                ((skipped+=1)); continue
-            fi
-            chgrp -R "$group" "$dest"; chmod -R g+rwX "$dest"; find "$dest" -type d -exec chmod g+s {} +
-            # A manifest is moved only when it unambiguously names this game.
-            manifest=$(find "$source" -maxdepth 1 -type f -name 'appmanifest_*.acf' -print0 | while IFS= read -r -d '' candidate; do
-                [[ "$(manifest_install_dir "$candidate")" == "$name" ]] && { printf '%s' "$candidate"; break; }
-            done)
-            if [[ -n "$manifest" ]]; then
-                target_manifest="$apps/$(basename "$manifest")"
-                if [[ -e "$target_manifest" ]] && ! cmp -s "$manifest" "$target_manifest"; then
-                    note "migration retained source $user/$name: manifest conflicts with $(basename "$target_manifest")"
-                    rm -rf -- "$dest"
-                    ((skipped+=1)); continue
-                fi
-                [[ -e "$target_manifest" ]] || install -o root -g "$group" -m 0664 "$manifest" "$target_manifest"
-                rm -f -- "$manifest"
-            else
-                note "migration retained source $user/$name: no matching appmanifest found"
-                rm -rf -- "$dest"
-                ((skipped+=1)); continue
-            fi
-            rm -rf -- "$game"
-            ((migrated+=1))
-        done < <(find "$source/common" -mindepth 1 -maxdepth 1 -type d -print0)
-    done < <(enrolled_users)
-    note "migration complete: $migrated game directory/directories moved; $skipped skipped"
-}
-
 cmd_users() {
     local action=${1:-} user=${2:-} library path users=()
     case "$action" in
@@ -453,6 +451,7 @@ cmd_users() {
             steam_running_for "$user" && die "Steam is running for $user. Ask them to sign out before enrolling them."
             assert_steam_stopped; ensure_config; ensure_group
             usermod -aG "$group" "$user"
+            disable_steam_autostart "$user"
             if steam_initialized_for "$user"; then
                 while IFS= read -r library; do prepare_user_private_dirs "$user" "$library"; done < <(library_paths)
             else
@@ -466,6 +465,7 @@ cmd_users() {
             getent passwd "$user" >/dev/null || die "unknown user: $user"
             assert_steam_stopped
             gpasswd -d "$user" "$group" >/dev/null 2>&1 || true
+            restore_steam_autostart "$user"
             note "removed $user from Ludus; no home-directory or game data was deleted"
             ;;
         *) die "usage: ludusctl users list|personal-libraries|remove-personal-library|enroll|remove" ;;
@@ -536,14 +536,7 @@ cmd_libraries() {
         repair)
             require_root; assert_steam_stopped; while IFS= read -r library; do repair_library "$library"; done < <(library_paths)
             ;;
-        migrate)
-            [[ -n "$raw" ]] || die "usage: ludusctl libraries migrate <configured-path> [--yes]"
-            library=$(canonical_path "$raw")
-            while IFS= read -r path; do [[ "$path" == "$library" ]] && found=true; done < <(library_paths)
-            "$found" || die "library is not configured: $library"
-            migrate_library "$library" "$extra"
-            ;;
-        *) die "usage: ludusctl libraries list|candidates|add|add-default|remove|default|set-default|label|check|repair|migrate" ;;
+        *) die "usage: ludusctl libraries list|candidates|add|add-default|remove|default|set-default|label|check|repair" ;;
     esac
 }
 

@@ -1,10 +1,13 @@
 module ludus_controller 1.0;
 
 require {
+    attribute domain;
+    attribute exec_type;
+    attribute file_type;
+    role system_r;
     type init_t;
-    type input_device_t;
+    type event_device_t;
     type proc_t;
-    type uinput_device_t;
     class dir { getattr open read search };
     class file { entrypoint execute getattr map open read };
     class chr_file { getattr ioctl open read write };
@@ -16,14 +19,21 @@ require {
 # to avoid emitting keys outside the Plasma Login greeter.
 type ludus_controller_t;
 type ludus_controller_exec_t;
+typeattribute ludus_controller_t domain;
+typeattribute ludus_controller_exec_t file_type;
+typeattribute ludus_controller_exec_t exec_type;
+role system_r types ludus_controller_t;
 
 allow init_t ludus_controller_exec_t:file { execute getattr map open read };
 allow init_t ludus_controller_t:process transition;
 type_transition init_t ludus_controller_exec_t:process ludus_controller_t;
 
 allow ludus_controller_t ludus_controller_exec_t:file { entrypoint execute getattr map open read };
-allow ludus_controller_t input_device_t:dir search;
-allow ludus_controller_t input_device_t:chr_file { getattr ioctl open read };
-allow ludus_controller_t uinput_device_t:chr_file { getattr ioctl open write };
+# Current Fedora/Bazzite policy labels both physical event devices and uinput
+# as event_device_t.  Device-node ownership still prevents non-root access;
+# this domain is limited to the event-device operations required to relay a
+# controller as a virtual keyboard.
+allow ludus_controller_t event_device_t:dir search;
+allow ludus_controller_t event_device_t:chr_file { getattr ioctl open read write };
 allow ludus_controller_t proc_t:dir { getattr open read search };
 allow ludus_controller_t proc_t:file { getattr open read };

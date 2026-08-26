@@ -15,7 +15,10 @@ Implemented on the Bazzite VM:
 - A custom Plasma Login greeter shows only members of the `ludus` group and
   starts their normal Plasma Wayland session through `ludus.desktop`.
 - Player cards support mouse click selection and keyboard Left/Right/Enter.
-  The controller bridge maps common gamepad Left/Right/A input to those keys.
+  Display names use one blue colour; the selected card has a close pulsing
+  glow ring, and hovering a card moves the same selection used by keyboard
+  and controller navigation. The controller bridge maps common gamepad
+  Left/Right/A input to those keys.
 - The locally built greeter is version-matched to the installed Plasma Login
   package; the vendor greeter remains a compatibility fallback.
 - A Ludus splash launches Steam Big Picture through Bazzite's launcher. If
@@ -24,30 +27,32 @@ Implemented on the Bazzite VM:
 - The root mount daemon has its own `/run/ludus-mount` runtime directory. This
   avoids the prior failure where a WebUI backend restart deleted its socket.
 
-### Controller navigation: ready to validate
+### Controller navigation
 
-- The controller bridge now has a dedicated `ludus_controller_t` SELinux
-  domain. It is limited to reading physical input devices, writing `/dev/uinput`,
-  and checking whether the greeter is active; only the bridge executable is
-  labelled for this transition.
-- Install and validate on the enforcing Bazzite VM with a real controller:
-  Left/Right/A navigation at the greeter, service restart behaviour, and a
-  clean AVC log with no broad allow rules.
+- The controller bridge runs in a dedicated `ludus_controller_t` SELinux
+  domain. The policy was updated for current Bazzite/Fedora device labels
+  (`event_device_t`) and now declares the required executable and system-role
+  attributes. The bridge is correctly labelled, active, and has `/dev/uinput`
+  open; `ludusctl doctor --json` reports the controller policy and label as
+  healthy under enforcing SELinux.
+- Still validate Left/Right/A navigation with a real connected controller at
+  the greeter.
 
 ## Phase 2: shared Steam libraries
 
 Implemented on the Bazzite VM:
 
-- `ludusctl` manages shared libraries, enrolled users, safe repair, and a
-  conservative migration workflow.
+- `ludusctl` manages shared libraries, enrolled users, and safe repair.
 - Shared content is `root:ludus`, group-writable, and setgid. Proton
   `compatdata` and shader caches are private per player under their home.
 - A user who has not completed their first Steam login is shown as awaiting
-  Steam setup. Ludus defers their private-library and Steam-VDF work until the
-  next Ludus launch after that first login.
-- Steam registrations are written to both Bazzite Steam VDF locations. Global
-  shared libraries can be selected as Steam's default library; each
-  Steam-ready user is updated immediately and later users inherit the choice.
+  Steam setup. Ludus opens that user at the normal desktop rather than trying
+  Big Picture; after they sign in to Steam once, their private-library and
+  Steam-VDF work runs at the next Ludus launch.
+- Steam registrations are written to both Bazzite Steam VDF locations. Ludus
+  records the administrator's preferred shared library, but Steam's actual
+  default install choice remains per user and is selected in Steam's Storage
+  UI.
 - The Libraries UI distinguishes global Ludus libraries from a user's personal
   Steam library registrations. Removing a personal registration only edits the
   Steam VDF files (with backups); it never deletes games or user data.
@@ -60,9 +65,11 @@ Implemented on the Bazzite VM:
   former is selected as Miguel's Steam default; the latter remains available
   for larger games.
   Steam's mandatory per-user home library is labelled **DO NOT USE** and is
-  retained for client/account data. Both enrolled users have verified access
-  to both shared paths. Steam/Big Picture launch with the library arrangement
-  has been verified for Miguel; Steph still needs their first Steam login.
+  retained for client/account data. The shared paths have the required group
+  access; Steam/Big Picture launch with this arrangement has been verified for
+  Miguel and Steph. Steph completed her first normal-desktop Steam sign-in,
+  then her next Ludus session entered Big Picture with both shared libraries
+  registered and Miguel's installed games visible.
 - New shared libraries no longer need one manual Steam Storage setup. Ludus
   creates a unique numeric `libraryfolder.vdf` content ID and writes matching
   user registrations; an empty automatic-library test was accepted by Steam
@@ -71,14 +78,29 @@ Implemented on the Bazzite VM:
   labels are `SSD` for the system-disk library and `NVME` for the additional
   disk.
 
+Validated on the Bazzite VM:
+
+- A real shared game was installed and uninstalled by each player in turn.
+  It appeared correctly for the other player in both directions, confirming
+  the shared-library registration and visibility path for Miguel and Steph.
+
 Still to validate later:
 
-- Install, launch, update, and uninstall real shared games as Miguel and then
-  Steph.
-- Complete Steph's first Steam login and validate deferred registration.
-- Exercise populated-library migration, Workshop content, Proton/shader
-  isolation, repair, reboot persistence, uninstall, and Bazzite-update
-  recovery.
+- Launch and update real shared games as Miguel and then Steph.
+- Exercise Workshop content, Proton/shader isolation, repair, reboot
+  persistence, uninstall, and Bazzite-update recovery.
+
+### Installer and removal lifecycle
+
+- The installer now declares all build and SELinux tooling it invokes, tracks
+  every Steam autostart entry it takes over (including users later enrolled
+  through the WebUI), and preserves the original file for restoration.
+- The uninstaller restores those tracked autostart entries, removes the
+  installer-created `ludus-web` service account and group, and removes only
+  clearly marked `/etc/fstab` records created by Ludus disk adoption. It
+  deliberately retains users, the `ludus` group, games, Steam registrations,
+  mounted disks, and timestamped recovery backups.
+- The obsolete, uncalled Steam VDF `make-default` implementation was removed.
 
 ## Phase 2: WebUI
 
@@ -147,16 +169,9 @@ step, CDN or external icon service.
 Validate on the Bazzite VM in idle and active-player states, and confirm that
 every doctor line is recognised rather than falling back to raw text.
 
-### Planned WebUI refinement
-
-Still outstanding from that pass:
-
-- Migration controls for populated libraries. `ludusctl libraries migrate` and
-  the `libraries.migrate` backend operation exist, but nothing in the WebUI
-  reaches them yet.
-
 ## Other remaining work
 
-- Add a GPL-3.0-or-later licence file and retain applicable upstream notices.
+- The repository now includes the GPL-3.0-or-later licence text. Retain
+  applicable upstream notices as the project incorporates upstream work.
 - Improve WebUI authentication with sessions and rate limiting if the project
   later needs stronger LAN-facing security.

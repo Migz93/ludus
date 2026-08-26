@@ -2,6 +2,8 @@
 
 Ludus is an experimental, controller-first multi-user launcher for **Bazzite Desktop KDE**. It presents a console-style player selector, starts a separate Linux user session for the selected player, and hands off to Steam Big Picture only after it is ready.
 
+Ludus is licensed under [GNU GPL v3.0 or later](LICENSE).
+
 Ludus is a single-player console experience: only one Ludus user session may be
 active at a time.  A player must sign out before another player signs in; it
 does not support concurrent player sessions or in-session user switching.
@@ -56,6 +58,9 @@ boot -> plasmalogin -> Ludus player selector
 ```
 
 The loading cover stays above Plasma panels while Steam starts. It waits for Xwayland before launching Steam, then only clears after the Steam Big Picture window is detected.
+For a player who has never signed in to Steam on this machine, Ludus opens the
+normal Plasma desktop without starting Steam; they should open Steam normally,
+sign in once, then sign out and use Ludus normally thereafter.
 
 ## Enrolled users
 
@@ -124,7 +129,13 @@ sudo ./uninstall.sh
 sudo systemctl restart plasmalogin
 ```
 
-The uninstaller removes Ludus configuration and restores normal Plasma Login. It leaves the `ludus` group and user accounts intact. If graphical login is unavailable, use SSH or a local TTY to run the command.
+The uninstaller removes Ludus configuration and restores normal Plasma Login. It
+also restores any Steam autostart entries that Ludus changed, removes its
+installer-created WebUI service account, and removes only the clearly marked
+`/etc/fstab` entries created when Ludus adopted a disk. It deliberately leaves
+the `ludus` group, user accounts, game data, Steam library registrations, and
+timestamped recovery backups in `/var/lib/ludus/backups/` intact. If graphical
+login is unavailable, use SSH or a local TTY to run the command.
 
 ## Current limitations
 

@@ -97,24 +97,6 @@ def remove(user, requested):
         rewrite(path, document); changed = True
     if not changed: raise ValueError("library is not registered for this user")
 
-def make_default(user, requested):
-    documents = []
-    for path in steam_files(user):
-        if not os.path.isfile(path): continue
-        document, folders = entries(path)
-        selected = next((entry for key, entry in folders.items() if key.isdigit() and isinstance(entry, dict) and entry.get("path") == requested), None)
-        if selected is None: raise ValueError("library is not registered for this user")
-        replacement, next_key = {"0": selected}, 1
-        for key, entry in folders.items():
-            if key.isdigit():
-                if entry is selected: continue
-                replacement[str(next_key)] = entry; next_key += 1
-            else: replacement[key] = entry
-        document["libraryfolders"] = replacement
-        documents.append((path, document))
-    if not documents: raise ValueError("Steam has not created a libraryfolders.vdf yet")
-    for path, document in documents: rewrite(path, document)
-
 def set_library_label(user, requested, label):
     changed = False
     for path in steam_files(user):
@@ -218,7 +200,7 @@ def check(user):
                         f"Steam registration {user}: {path} has all shared libraries"))
     return not problems, records
 
-if len(sys.argv) < 3 or sys.argv[1] not in {"list", "list-many", "remove", "make-default", "set-library-label", "set-shared-library-label", "label-home-library", "check", "check-records"}: raise SystemExit("usage: ludus-steam-user-libraries list <user> | list-many <user>... | remove <user> <path> | make-default <user> <path> | set-library-label <user> <path> <label> | set-shared-library-label <path> <label> | label-home-library <user> | check <user> | check-records <user>")
+if len(sys.argv) < 3 or sys.argv[1] not in {"list", "list-many", "remove", "set-library-label", "set-shared-library-label", "label-home-library", "check", "check-records"}: raise SystemExit("usage: ludus-steam-user-libraries list <user> | list-many <user>... | remove <user> <path> | set-library-label <user> <path> <label> | set-shared-library-label <path> <label> | label-home-library <user> | check <user> | check-records <user>")
 try:
     action = sys.argv[1]
     if action != "set-shared-library-label":
@@ -244,8 +226,5 @@ try:
             for severity, code, subject, data, message in records:
                 print("\t".join((severity, code, subject, data, message)) if action == "check-records" else f"{severity} {message}")
             if not ok: raise ValueError("one or more Steam VDF files are invalid")
-        else:
-            if len(sys.argv) != 4: raise ValueError("a library path is required")
-            make_default(sys.argv[2], sys.argv[3]); print("updated Steam default library")
 except (OSError, ValueError) as error:
     raise SystemExit(f"ludus-steam-user-libraries: {error}")

@@ -61,7 +61,7 @@ In particular, inspect its:
 - per-user shader/cache handling
 - `libraryfolders.vdf` handling
 - Steam library registration
-- migration logic
+- handling of pre-existing content
 - repair/health-check logic
 - uninstall/cleanup logic
 
@@ -229,7 +229,7 @@ Existing configuration should be detected and reconciled.
 ### Steam-running precondition
 
 Any operation that changes a shared library's structure, manifests,
-`libraryfolders.vdf`, ownership, registration, or migration state must first
+`libraryfolders.vdf`, ownership, or registration must first
 verify that Steam is stopped for every enrolled user.  If it is running, the
 CLI and WebUI must make no change and explain which user/process must exit.
 
@@ -416,7 +416,6 @@ ludusctl libraries add <path>
 ludusctl libraries remove <path>
 ludusctl libraries check
 ludusctl libraries repair
-ludusctl libraries migrate <path>
 
 ludusctl doctor
 ludusctl repair
@@ -480,7 +479,7 @@ Possible locations:
 ```
 
 Use `/etc/ludus` for administrator-managed configuration and `/var/lib/ludus`
-for durable service state, migrations, and backups.  Use `/opt/ludus` only if a
+for durable service state and backups.  Use `/opt/ludus` only if a
 future packaged application payload genuinely needs it; it is not the place for
 mutable configuration or state.  Executables and systemd units should follow
 the existing Bazzite-compatible installation conventions.
@@ -491,7 +490,6 @@ We will likely need persisted information such as:
 
 - configured shared library paths
 - schema/version information
-- migration state
 - WebUI configuration
 - Ludus component configuration
 
@@ -537,31 +535,17 @@ Where ownership/layout changes cannot safely be automatically reversed, document
 
 ---
 
-# 7. Migration and Existing Steam Content
+# 7. Existing Steam Content
 
-Design for a real machine that may already have Steam games installed.
+Player-owned game installations are deliberately outside Ludus's scope. Ludus
+must never move, rewrite, or delete games or Steam manifests from a player's
+existing library. A player can choose how to manage old installations through
+Steam itself.
 
-Do not assume all shared libraries start empty.
-
-Investigate and adapt the useful migration behaviour from `steam-multiuser`.
-
-We should be able to take an existing Steam library and enrol it into Ludus without unnecessarily redownloading its games.
-
-Migration should:
-
-- preserve installed game files
-- preserve manifests
-- establish correct ownership/permissions
-- establish the shared/private directory structure
-- avoid destroying existing per-user data
-- detect ambiguous or unsafe states and stop with an explanation
-
-Conflicting or duplicate installations of the same app are outside the initial
-automatic-migration scope.  Detect and report them without modifying either
-copy; add an explicit resolution workflow only once real-world cases establish
-the required policy.
-
-Always prefer preserving data over aggressively forcing the desired layout.
+New Ludus shared-library directories must be prepared safely and must have
+empty `compatdata` and shader-cache bind targets before Ludus makes those paths
+private. If an existing directory conflicts with that layout, Ludus reports the
+conflict and leaves it untouched.
 
 ---
 

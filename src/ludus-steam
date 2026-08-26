@@ -7,6 +7,11 @@ set -Eeuo pipefail
 ready_file="$XDG_RUNTIME_DIR/ludus-steam-ready"
 [[ -e "$ready_file" ]] && unlink "$ready_file"
 
+# The dedicated Ludus session deliberately leaves first-time Steam users at
+# their desktop.  Keep this defensive guard as well, so an accidental direct
+# invocation cannot open Big Picture before that user has signed in normally.
+[[ -s "$HOME/.local/share/Steam/config/loginusers.vdf" ]] || exit 0
+
 for _ in $(seq 1 300); do
     while read -r pid; do
         args=$(tr '\0' '\n' < "/proc/$pid/cmdline" 2>/dev/null || true)
@@ -15,15 +20,11 @@ for _ in $(seq 1 300); do
         [[ -n "$display" && -n "$authority" && -r "$authority" ]] || continue
         if DISPLAY="$display" XAUTHORITY="$authority" /usr/bin/xdpyinfo >/dev/null 2>&1; then
             export DISPLAY="$display" XAUTHORITY="$authority"
-            if [[ -s "$HOME/.local/share/Steam/config/loginusers.vdf" ]]; then
-                /usr/local/lib/ludus/ludus-mountctl mount
-                trap '/usr/local/lib/ludus/ludus-mountctl unmount || true' EXIT
-                # Register shared libraries while Steam is stopped.  The helper is
-                # deliberately unprivileged: it only writes this user's Steam VDF.
-                /usr/local/lib/ludus/ludus-steam-register-libraries || true
-            else
-                logger -t ludus-steam "deferring Ludus library setup until this user's first Steam login"
-            fi
+            /usr/local/lib/ludus/ludus-mountctl mount
+            trap '/usr/local/lib/ludus/ludus-mountctl unmount || true' EXIT
+            # Register shared libraries while Steam is stopped.  The helper is
+            # deliberately unprivileged: it only writes this user's Steam VDF.
+            /usr/local/lib/ludus/ludus-steam-register-libraries || true
             /usr/bin/bazzite-steam steam://open/bigpicture &
             steam_pid=$!
             for _ in $(seq 1 450); do

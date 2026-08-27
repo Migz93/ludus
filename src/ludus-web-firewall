@@ -12,9 +12,11 @@ zone=$(cat "$state" 2>/dev/null || firewall-cmd --get-default-zone)
 # private network.  The WebUI independently checks source addresses, but do
 # not rely on that application-level check to compensate for a public zone.
 case "$zone" in
-    home|internal|trusted) ;;
+    # FedoraWorkstation is Bazzite's default workstation zone. The WebUI's
+    # independent private-subnet check remains mandatory for that zone.
+    home|internal|trusted|FedoraWorkstation) ;;
     *)
-        echo "ludus-web-firewall: refusing to open TCP $port in untrusted zone '$zone'; use a home, internal, or trusted firewalld zone" >&2
+        echo "ludus-web-firewall: refusing to open TCP $port in untrusted zone '$zone'; use a home, internal, trusted, or FedoraWorkstation firewalld zone" >&2
         exit 1
         ;;
 esac

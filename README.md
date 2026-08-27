@@ -112,10 +112,11 @@ sudo systemctl restart plasmalogin
 ## Management WebUI
 
 The installer starts the management service on port `9876`. It only opens the
-firewall port in a `home`, `internal`, or `trusted` firewalld zone; the WebUI
-itself also admits only loopback and directly connected private IPv4 subnets.
-If the active zone is not one of those private-network zones, configure it
-before enabling LAN access. The built-in server is HTTP-only: HTTP Basic/PAM
+firewall port in a `home`, `internal`, `trusted`, or Bazzite's default
+`FedoraWorkstation` firewalld zone; the WebUI itself also admits only loopback
+and directly connected private IPv4 subnets. If the active zone is not one of
+those supported zones, configure it before enabling LAN access. The built-in
+server is HTTP-only: HTTP Basic/PAM
 credentials are plaintext on the network. Use it only through a trusted wired
 LAN, an authenticated VPN, or a TLS-terminating reverse proxy—never ordinary
 Wi-Fi or an untrusted network. Open

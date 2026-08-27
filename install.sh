@@ -7,6 +7,36 @@ install_root=/usr/local/lib/ludus
 unit_dir=/etc/systemd/system
 config_dir=/etc/ludus
 
+reboot_into_staged_deployment() {
+  echo
+  echo "Ludus has not changed the login stack. A reboot is required to use the staged dependencies."
+  echo "After it has booted, return to this checkout and run: sudo ./install.sh"
+  if [[ -t 0 ]]; then
+    local answer
+    read -r -p "Reboot now? [y/N] " answer
+    if [[ "$answer" =~ ^[Yy]([Ee][Ss])?$ ]]; then
+      echo "Rebooting into the staged deployment..."
+      systemctl reboot
+    fi
+  fi
+}
+
+restart_plasmalogin() {
+  echo
+  echo "The installation is complete. Plasma Login must be restarted to load the Ludus greeter."
+  echo "This returns the graphical display to the login screen; it does not require a full reboot."
+  if [[ -t 0 ]]; then
+    local answer
+    read -r -p "Restart Plasma Login now? [Y/n] " answer
+    if [[ ! "$answer" =~ ^[Nn]([Oo])?$ ]]; then
+      systemctl restart plasmalogin
+      echo "Plasma Login restarted. Ludus is now active."
+      return
+    fi
+  fi
+  echo "To activate Ludus later, run: sudo systemctl restart plasmalogin"
+}
+
 if (( EUID != 0 )); then
   echo "Run as root: sudo $0" >&2; exit 1
 fi
@@ -22,20 +52,21 @@ fi
 # rpm-ostree cannot amend a completed staged deployment.  Do not misleadingly
 # attempt another transaction before it has been booted.
 if rpm-ostree status --json | jq -e '.deployments[] | select(.staged == true)' >/dev/null; then
-  echo "A deployment is already staged. Reboot into it before rerunning this installer."
+  echo "A previous run has already staged an rpm-ostree deployment."
+  reboot_into_staged_deployment
   exit 0
 fi
 
 # A deployment reboot is required before any login configuration is changed.
 # Complete upstream Plasma Login build closure on Fedora/Bazzite 44.
 # Keep this list together so a fresh install needs only one deployment reboot.
-needed=(git-core gcc checkpolicy policycoreutils-python-utils rpm-build cmake ninja-build pam-devel systemd-devel libXau-devel qt6-qtbase-devel qt6-qtdeclarative-devel qt6-qtshadertools-devel extra-cmake-modules kf6-kconfig-devel kf6-kcoreaddons-devel kf6-kpackage-devel kf6-kwindowsystem-devel kf6-ki18n-devel kf6-kdbusaddons-devel kf6-kcmutils-devel kf6-kauth-devel kf6-kio-devel libplasma-devel libkscreen-devel plasma-workspace-devel layer-shell-qt-devel)
+needed=(git-core gcc checkpolicy policycoreutils-python-utils rpm-build cmake ninja-build pam-devel systemd-devel libXau-devel qt6-qtbase-devel qt6-qtdeclarative-devel qt6-qtshadertools-devel extra-cmake-modules kf6-kconfig-devel kf6-kcoreaddons-devel kf6-kpackage-devel kf6-kwindowsystem-devel kf6-ki18n-devel kf6-kdbusaddons-devel kf6-kcmutils-devel kf6-kauth-devel kf6-kio-devel libplasma-devel libkscreen-devel plasma-workspace-devel layer-shell-qt-devel python3-paho-mqtt)
 missing=()
 for package in "${needed[@]}"; do rpm -q "$package" &>/dev/null || missing+=("$package"); done
 if ((${#missing[@]})); then
   echo "Staging build dependencies in the next rpm-ostree deployment: ${missing[*]}"
   rpm-ostree install "${missing[@]}"
-  echo "Reboot into that deployment, then rerun this installer. No login files were changed."
+  reboot_into_staged_deployment
   exit 0
 fi
 
@@ -53,6 +84,7 @@ trap 'rm -rf "$build_dir"' EXIT
 git clone --depth 1 --branch "v$expected_plasma_login" https://invent.kde.org/plasma/plasma-login-manager.git "$build_dir/source"
 install -m 0644 "$project_dir/src/Main.qml" "$build_dir/source/src/frontend/greeter/qml/Main.qml"
 git -C "$build_dir/source" apply "$project_dir/patches/0001-only-show-ludus-members.patch"
+git -C "$build_dir/source" apply "$project_dir/patches/0002-remote-mqtt-login-bridge.patch"
 cmake -S "$build_dir/source" -B "$build_dir/build" -GNinja -DCMAKE_BUILD_TYPE=Release
 ninja -C "$build_dir/build" plasma-login-greeter
 install -m 0755 "$build_dir/build/bin/plasma-login-greeter" "$install_root/plasma-login-greeter"
@@ -74,6 +106,7 @@ install -m 0755 "$project_dir/src/ludus-mountd.py" "$install_root/ludus-mountd"
 install -m 0755 "$project_dir/src/ludus-mountctl.py" "$install_root/ludus-mountctl"
 install -m 0755 "$project_dir/src/ludus-backend.py" "$install_root/ludus-backend"
 install -m 0755 "$project_dir/src/ludus-web.py" "$install_root/ludus-web"
+install -m 0755 "$project_dir/src/ludus-mqtt.py" "$install_root/ludus-mqtt"
 # The WebUI reads these three fixed names once at start-up and serves one
 # self-contained page; no request path is ever mapped onto the filesystem.
 install -d -m 0755 "$install_root/web"
@@ -88,6 +121,7 @@ install -m 0644 "$project_dir/systemd/ludus-mount.service" "$unit_dir/ludus-moun
 install -m 0644 "$project_dir/systemd/ludus-backend.service" "$unit_dir/ludus-backend.service"
 install -m 0644 "$project_dir/systemd/ludus-web.service" "$unit_dir/ludus-web.service"
 install -m 0644 "$project_dir/systemd/ludus-web-firewall.service" "$unit_dir/ludus-web-firewall.service"
+install -m 0644 "$project_dir/systemd/ludus-mqtt.service" "$unit_dir/ludus-mqtt.service"
 install -m 0644 "$project_dir/sessions/ludus.desktop" /usr/local/share/wayland-sessions/ludus.desktop
 install -m 0644 "$project_dir/config/plasmalogin-ludus.pam" /etc/pam.d/plasmalogin-ludus
 install -m 0644 "$project_dir/config/ludus-web.pam" /etc/pam.d/ludus-web
@@ -123,11 +157,19 @@ if ! id ludus-web >/dev/null 2>&1; then
   useradd --system -g ludus-web -M -s /usr/sbin/nologin ludus-web
   : > "$config_dir/created-ludus-web-user"
 fi
-if [[ ! -e "$config_dir/webui.json" ]]; then
-  printf '%s\n' '{"auth_mode":"none","listen":"0.0.0.0","port":9876}' > "$config_dir/webui.json"
-  chown root:ludus-web "$config_dir/webui.json"; chmod 0640 "$config_dir/webui.json"
+if [[ ! -e "$config_dir/webui.json" ]] || python3 -c 'import json, sys; sys.exit(json.load(open(sys.argv[1])).get("auth_mode") != "none")' "$config_dir/webui.json"; then
+  # PAM service ludus-web authorizes only members of the local wheel group.
+  # Upgrade old unauthenticated configurations to that secure default too.
+  webui_config_tmp=$(mktemp "$config_dir/webui.XXXXXX")
+  printf '%s\n' '{"auth_mode":"pam","listen":"0.0.0.0","port":9876}' > "$webui_config_tmp"
+  chown root:ludus-web "$webui_config_tmp"; chmod 0640 "$webui_config_tmp"
+  mv -f "$webui_config_tmp" "$config_dir/webui.json"
 fi
 [[ -e "$config_dir/libraries.conf" ]] || install -m 0644 /dev/null "$config_dir/libraries.conf"
+if [[ ! -e "$config_dir/mqtt.json" ]]; then
+  printf '%s\n' '{"enabled":false,"host":"","port":1883,"username":"","password":"","tls":false,"ca_cert":"","topic_prefix":""}' > "$config_dir/mqtt.json"
+  chmod 0600 "$config_dir/mqtt.json"
+fi
 # Steam's normal per-user autostart races the Ludus launcher. Disable it
 # only for explicitly enrolled Ludus accounts; the custom session owns Steam.
 autostart_state="$config_dir/steam-autostart-users"
@@ -172,5 +214,13 @@ systemctl daemon-reload
 systemctl enable ludus.service
 systemctl enable --now ludus-mount.service
 systemctl enable --now ludus-backend.service ludus-web.service ludus-web-firewall.service
-echo "Ludus installed. Add intended users to ludus, then restart plasmalogin or reboot to activate it."
+systemctl enable --now ludus-mqtt.service
+# An upgrade replaces the Python entry points in place.  `enable --now` does
+# not restart an already-active unit, so explicitly reload the services that
+# keep those files in memory before declaring the deployment complete.  MQTT
+# is restarted first: unlike the backend it does not own /run/ludus, avoiding
+# removal of the backend's live Unix socket.
+systemctl restart ludus-mqtt.service
+systemctl restart ludus-backend.service ludus-web.service ludus-web-firewall.service
+restart_plasmalogin
 echo "Backup: $backup"

@@ -14,6 +14,9 @@ GROUP = "ludus-web"
 CTL = "/usr/local/bin/ludusctl"
 PAM_HELPER = "/usr/local/lib/ludus/ludus-pam-auth"
 WEB_CONFIG = "/etc/ludus/webui.json"
+MQTT_CONFIG = "/etc/ludus/mqtt.json"
+MQTT_STATUS = "/run/ludus/mqtt-status.json"
+MQTT_HELPER = "/usr/local/lib/ludus/ludus-mqtt"
 VSCODE_POLICY = "/usr/local/lib/ludus/ludus_vscode_ssh.pp"
 READ = {
     "status": ["status"], "doctor": ["doctor"],
@@ -46,8 +49,18 @@ def peer_ok(connection):
 
 
 def receive(connection):
-    data = connection.recv(8193)
-    if not data or len(data) > 8192:
+    connection.settimeout(5)
+    chunks, size = [], 0
+    while True:
+        chunk = connection.recv(min(8192 - size + 1, 4096))
+        if not chunk:
+            break
+        chunks.append(chunk)
+        size += len(chunk)
+        if size > 8192:
+            raise RuntimeError("invalid request size")
+    data = b"".join(chunks)
+    if not data:
         raise RuntimeError("invalid request size")
     request = json.loads(data)
     if not isinstance(request, dict):
@@ -142,6 +155,64 @@ def pam_authentication(argument):
     return {"ok": result.returncode == 0, "error": "invalid administrator credentials" if result.returncode else ""}
 
 
+def mqtt_settings():
+    try:
+        with open(MQTT_CONFIG, encoding="utf-8") as source: config = json.load(source)
+    except (OSError, ValueError): config = {}
+    try:
+        with open(MQTT_STATUS, encoding="utf-8") as source: status = json.load(source)
+    except (OSError, ValueError): status = {}
+    return {"ok": True, "enabled": bool(config.get("enabled", False)),
+            "host": str(config.get("host", "")), "port": config.get("port", 1883),
+            "username": str(config.get("username", "")), "password_set": bool(config.get("password", "")),
+            "tls": bool(config.get("tls", False)), "ca_cert": str(config.get("ca_cert", "")),
+            "topic_prefix": str(config.get("topic_prefix", "")), "status": status}
+
+
+def save_mqtt_settings(argument):
+    if not isinstance(argument, dict): raise RuntimeError("invalid MQTT configuration")
+    enabled, tls = argument.get("enabled"), argument.get("tls")
+    host, username, prefix, ca_cert = (argument.get("host"), argument.get("username"),
+                                       argument.get("topic_prefix"), argument.get("ca_cert", ""))
+    if not isinstance(enabled, bool) or not isinstance(tls, bool): raise RuntimeError("invalid MQTT setting")
+    if not all(isinstance(value, str) for value in (host, username, prefix, ca_cert)):
+        raise RuntimeError("invalid MQTT setting")
+    try: port = int(argument.get("port", 1883))
+    except (TypeError, ValueError): raise RuntimeError("MQTT port must be a number")
+    if not 1 <= port <= 65535: raise RuntimeError("MQTT port must be between 1 and 65535")
+    if len(host) > 255 or any(char.isspace() for char in host) or (enabled and not host):
+        raise RuntimeError("MQTT broker host is required and cannot contain spaces")
+    if len(username) > 256 or any(char in username for char in "\x00\r\n"):
+        raise RuntimeError("invalid MQTT username")
+    if len(prefix) > 255 or prefix.startswith("/") or prefix.endswith("/") or any(char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-/" for char in prefix):
+        raise RuntimeError("MQTT topic prefix may contain only letters, numbers, hyphens, underscores and slashes")
+    if ca_cert and (not ca_cert.startswith("/") or len(ca_cert) > 4096 or "\x00" in ca_cert):
+        raise RuntimeError("CA certificate must be an absolute path")
+    try:
+        with open(MQTT_CONFIG, encoding="utf-8") as source: old = json.load(source)
+    except (OSError, ValueError): old = {}
+    password = argument.get("password")
+    if password is not None:
+        if not isinstance(password, str) or len(password) > 1024: raise RuntimeError("invalid MQTT password")
+    else:
+        password = old.get("password", "")
+    config = {"enabled": enabled, "host": host, "port": port, "username": username,
+              "password": password, "tls": tls, "ca_cert": ca_cert, "topic_prefix": prefix}
+    temporary = MQTT_CONFIG + ".new"
+    with open(temporary, "w", encoding="utf-8") as target:
+        json.dump(config, target, separators=(",", ":")); target.write("\n")
+    os.chmod(temporary, 0o600); os.replace(temporary, MQTT_CONFIG)
+    subprocess.run(["systemctl", "enable", "--now", "ludus-mqtt.service"], check=True, timeout=30)
+    subprocess.run(["systemctl", "restart", "ludus-mqtt.service"], check=True, timeout=30)
+    return {"ok": True, "output": "MQTT settings saved and service restarted."}
+
+
+def test_mqtt():
+    completed = subprocess.run([MQTT_HELPER, "--test"], text=True, capture_output=True,
+                               timeout=20, check=False)
+    return {"ok": completed.returncode == 0, "output": completed.stdout, "error": completed.stderr}
+
+
 def dispatch(request):
     operation = request.get("operation")
     if operation == "webui.settings":
@@ -157,6 +228,9 @@ def dispatch(request):
                 "vscode_ssh_forwarding_requested": config.get("vscode_ssh_forwarding", False),
                 "vscode_ssh_forwarding": vscode_policy_installed(),
                 "username": config.get("username", "")}
+    if operation == "mqtt.settings": return mqtt_settings()
+    if operation == "mqtt.save": return save_mqtt_settings(request.get("argument"))
+    if operation == "mqtt.test": return test_mqtt()
     if operation == "webui.rotate":
         return rotate_credentials(request.get("argument"))
     if operation == "webui.disable_auth":

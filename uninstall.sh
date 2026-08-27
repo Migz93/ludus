@@ -19,7 +19,7 @@ if [[ -r /etc/ludus/libraries.conf ]]; then
     done
   done < /etc/ludus/libraries.conf
 fi
-systemctl disable --now ludus.service ludus-mount.service ludus-backend.service ludus-web.service ludus-web-firewall.service 2>/dev/null || true
+systemctl disable --now ludus.service ludus-mount.service ludus-backend.service ludus-web.service ludus-web-firewall.service ludus-mqtt.service 2>/dev/null || true
 # Restore only the Steam autostart files this installer explicitly took over.
 # The preserved copy retains the original owner and mode; if none existed,
 # Ludus created the file and it is simply removed.
@@ -60,8 +60,6 @@ if command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>
   if [[ -r /etc/ludus/webui-firewall-zone ]]; then
     firewall-cmd --permanent --zone="$(cat /etc/ludus/webui-firewall-zone)" --remove-port=9876/tcp >/dev/null 2>&1 || true
   fi
-  firewall-cmd --permanent --delete-zone=ludus >/dev/null 2>&1 || true
-  firewall-cmd --delete-zone=ludus >/dev/null 2>&1 || true
   firewall-cmd --reload >/dev/null 2>&1 || true
 fi
 rm -f /etc/systemd/system/plasmalogin.service.d/ludus.conf
@@ -71,6 +69,7 @@ rm -f /etc/systemd/system/ludus-mount.service
 rm -f /etc/systemd/system/ludus-backend.service
 rm -f /etc/systemd/system/ludus-web.service
 rm -f /etc/systemd/system/ludus-web-firewall.service
+rm -f /etc/systemd/system/ludus-mqtt.service
 rm -f /etc/ludus/webui-firewall-zone /etc/pam.d/ludus-web
 semodule -r ludus_vscode_ssh >/dev/null 2>&1 || true
 semodule -r ludus_controller >/dev/null 2>&1 || true

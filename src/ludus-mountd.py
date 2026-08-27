@@ -36,12 +36,28 @@ def private_dir(user, library, name):
 def mounted(target):
     return subprocess.run(["mountpoint", "-q", target], check=False).returncode == 0
 
+def session_live(user):
+    """Whether the recorded user still owns the session that uses the binds."""
+    try:
+        uid = str(pwd.getpwnam(user).pw_uid)
+    except KeyError:
+        return False
+    # ludus-steam covers the short startup window before Steam itself appears.
+    return subprocess.run(
+        ["pgrep", "-u", uid, "-f", r"(^|/)(ludus-steam|steam|steamwebhelper|bazzite-steam)( |$)"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+    ).returncode == 0
+
 def mount_for(user):
     if os.path.exists(ACTIVE_USER):
         with open(ACTIVE_USER, encoding="utf-8") as file:
             active = file.read().strip()
         if active and active != user:
-            raise RuntimeError(f"another Ludus session is active: {active}")
+            if session_live(active):
+                raise RuntimeError(f"another Ludus session is active: {active}")
+            # A forced logout can bypass ludus-steam's EXIT trap.  Recover on
+            # the next legitimate login rather than leaving the console stuck.
+            unmount_for(active)
     for library in libraries():
         for name in ("compatdata", "shadercache"):
             target = os.path.join(library, "steamapps", name)
@@ -68,6 +84,16 @@ def unmount_for(user):
     try: os.unlink(ACTIVE_USER)
     except FileNotFoundError: pass
 
+def unmount_active():
+    """Privileged recovery/remote-control cleanup for the recorded session."""
+    try:
+        with open(ACTIVE_USER, encoding="utf-8") as file:
+            user = file.read().strip()
+    except FileNotFoundError:
+        return
+    if user:
+        unmount_for(user)
+
 def peer_user(connection):
     credentials = connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12)
     pid = int.from_bytes(credentials[0:4], "little")
@@ -75,13 +101,37 @@ def peer_user(connection):
     del pid
     return pwd.getpwuid(uid).pw_name
 
+def receive(connection):
+    connection.settimeout(5)
+    chunks, size = [], 0
+    while True:
+        chunk = connection.recv(min(4096 - size + 1, 4096))
+        if not chunk:
+            break
+        chunks.append(chunk)
+        size += len(chunk)
+        if size > 4096:
+            raise RuntimeError("invalid request size")
+    if not chunks:
+        raise RuntimeError("invalid request")
+    request = json.loads(b"".join(chunks).decode("utf-8"))
+    if not isinstance(request, dict):
+        raise RuntimeError("invalid request")
+    return request
+
 def handle(connection):
     user = peer_user(connection)
     try:
-        request = json.loads(connection.recv(4096).decode("utf-8"))
-        if request.get("action") not in {"mount", "unmount"} or not member(user):
+        request = receive(connection)
+        action = request.get("action")
+        # Normal users may only mount/unmount their own session. The one
+        # additional operation is root-only and is used after logind has
+        # terminated a remote session, when its shell EXIT trap may not run.
+        if action == "unmount-active" and user == "root":
+            unmount_active()
+        elif action not in {"mount", "unmount"} or not member(user):
             raise RuntimeError("request is not permitted")
-        if request["action"] == "mount": mount_for(user)
+        elif action == "mount": mount_for(user)
         else: unmount_for(user)
         response = {"ok": True}
     except Exception as error:

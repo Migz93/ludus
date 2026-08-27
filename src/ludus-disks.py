@@ -23,7 +23,9 @@ def mount(path, requested_target="/mnt/games"):
     if not isinstance(requested_target, str) or not requested_target.startswith("/") or "\x00" in requested_target:
         raise RuntimeError("mount point must be an absolute path")
     target = os.path.abspath(os.path.normpath(requested_target))
-    if target == "/" or os.path.exists(target):
+    if target in {"/", "/mnt", "/var/mnt"} or not (target.startswith("/mnt/") or target.startswith("/var/mnt/")):
+        raise RuntimeError("mount point must be below /mnt or /var/mnt")
+    if os.path.exists(target):
         raise RuntimeError("mount point must be a new directory")
     parent = os.path.dirname(target)
     resolved_parent = os.path.realpath(parent)

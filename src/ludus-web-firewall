@@ -8,6 +8,16 @@ if ! firewall-cmd --state >/dev/null 2>&1; then
     exit 0
 fi
 zone=$(cat "$state" 2>/dev/null || firewall-cmd --get-default-zone)
+# A plain port opening is safe only in a zone explicitly intended for a
+# private network.  The WebUI independently checks source addresses, but do
+# not rely on that application-level check to compensate for a public zone.
+case "$zone" in
+    home|internal|trusted) ;;
+    *)
+        echo "ludus-web-firewall: refusing to open TCP $port in untrusted zone '$zone'; use a home, internal, or trusted firewalld zone" >&2
+        exit 1
+        ;;
+esac
 firewall-cmd --permanent --zone="$zone" --add-port="$port/tcp" >/dev/null
 install -d -m 0755 /etc/ludus
 printf '%s\n' "$zone" > "$state"

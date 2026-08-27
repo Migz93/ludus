@@ -88,7 +88,12 @@ cd ludus
 sudo ./install.sh
 ```
 
-On a fresh Bazzite installation, the first run stages build dependencies with rpm-ostree and exits without changing the login stack. Reboot into that deployment, then run the installer again.
+On a fresh Bazzite installation, the first run stages every build dependency
+(including the optional MQTT client) in one rpm-ostree deployment and makes no
+login changes. It offers to reboot; after booting back in, run the same command
+again. The second run completes the installation and offers to restart Plasma
+Login, which activates Ludus without another full reboot. Non-interactive runs
+print the exact reboot or Plasma Login restart command instead.
 
 The installer:
 
@@ -98,7 +103,7 @@ The installer:
 - installs `ludus.service`, the `ludus.desktop` session, and `/etc/pam.d/plasmalogin-ludus`;
 - retains a timestamped backup before changing active login configuration.
 
-After installing, restart Plasma Login or reboot:
+If you decline the final prompt, activate Ludus later with:
 
 ```bash
 sudo systemctl restart plasmalogin
@@ -106,18 +111,43 @@ sudo systemctl restart plasmalogin
 
 ## Management WebUI
 
-The installer starts the management service on port `9876` and
-opens it only to the directly connected private IPv4 subnet. It refuses to add
-a firewall opening when that subnet cannot be identified as private. Open
+The installer starts the management service on port `9876`. It only opens the
+firewall port in a `home`, `internal`, or `trusted` firewalld zone; the WebUI
+itself also admits only loopback and directly connected private IPv4 subnets.
+If the active zone is not one of those private-network zones, configure it
+before enabling LAN access. Open
 `http://<ludus-hostname-or-LAN-IP>:9876/` from a trusted home-network device.
 The WebUI can enrol/remove players, manage existing shared-library directories,
 run safe repair checks, and rotate its own credentials. Removing a player or
 library never deletes a Linux account, game files, or home data.
 
-The WebUI has no credential by default and is restricted to loopback and the
-directly connected private LAN. Settings can require PAM authentication for
-`wheel` users, a local Ludus account, or both. Do not expose it to the
-Internet.
+The WebUI defaults to PAM authentication for local `wheel` (administrator)
+members. Sign in with that administrator account's normal Linux password.
+The WebUI is restricted to loopback and the directly connected private LAN.
+Settings can instead select a local Ludus account or accept either method. Do
+not expose it to the Internet. Re-running the installer upgrades an older
+unauthenticated WebUI configuration to the PAM administrator default.
+
+## Home Assistant MQTT
+
+The optional MQTT integration is configured from the WebUI's **MQTT** page.
+It uses Home Assistant MQTT Discovery to create a Ludus device with a player
+selector, session-active and active-player status, lifecycle/error sensors,
+and one-shot Sign out, Restart, and Shut down buttons. The selector includes
+`Inactive` plus the currently enrolled Ludus users.
+
+Selecting a player publishes a retained request, so it can be made before the
+PC is powered on. Once the machine reaches the Ludus greeter, it consumes the
+request, starts that selected user's normal Ludus session, and resets the
+selector to `Inactive`. Selecting `Inactive` before then clears the pending
+request. Requests expire after two minutes once handed to the greeter and are
+rejected whenever another Ludus session is active.
+
+Use a dedicated broker account with narrowly scoped topic permissions. Anyone
+allowed to publish Ludus commands can start an enrolled account without its
+password, sign out the active player, or power-cycle the PC. Keep MQTT on your
+trusted network; use TLS where your broker supports it and access Home
+Assistant remotely through your usual VPN or other secured route.
 
 ## Update behavior
 

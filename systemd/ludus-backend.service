@@ -6,6 +6,12 @@ After=local-fs.target
 ExecStart=/usr/local/lib/ludus/ludus-backend
 Restart=on-failure
 RuntimeDirectory=ludus
+# MQTT writes its local status and one-shot greeter request alongside this
+# socket.  Preserve the directory during a backend restart so those files and
+# the socket are not unexpectedly removed by an unrelated service reload.
+RuntimeDirectoryPreserve=restart
+NoNewPrivileges=yes
+PrivateTmp=yes
 
 [Install]
 WantedBy=multi-user.target

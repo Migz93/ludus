@@ -121,7 +121,9 @@ Implemented on the Bazzite VM:
 - The WebUI uses an unprivileged service and a root backend with an explicit
   operation allow-list over a peer-credential-checked Unix socket.
 - Authentication can be configured in Settings as none, PAM (`wheel` users),
-  a local Ludus account, or both. The default is no WebUI credential.
+  a local Ludus account, or both. Fresh installs require PAM authentication
+  for `wheel` administrators; administrators can later change the selected
+  authentication mode.
 - Settings also has an opt-in narrow SELinux compatibility policy for VS Code
   Remote SSH TCP forwarding; it is off by default.
 - The UI includes Dashboard, Users, Global/User Libraries, Disk Tools,
@@ -195,3 +197,9 @@ falling back to raw text.
 
 - The repository now includes the GPL-3.0-or-later licence text. Retain
   applicable upstream notices as the project incorporates upstream work.
+- Home Assistant MQTT integration is implemented in the repository but still
+  needs end-to-end validation against a real broker, Home Assistant discovery,
+  Wake-on-LAN workflow, and the physical Plasma Login greeter.
+- The MQTT dependency, service, configuration file, WebUI/backend route and
+  doctor checks were deployed successfully to the Bazzite VM. The integration
+  is deliberately disabled there until broker details are configured.

@@ -6,6 +6,8 @@ After=plasmalogin.service
 Type=simple
 ExecStart=/usr/local/lib/ludus/ludus-controller-bridge
 Restart=on-abnormal
+NoNewPrivileges=yes
+PrivateTmp=yes
 
 [Install]
 WantedBy=graphical.target

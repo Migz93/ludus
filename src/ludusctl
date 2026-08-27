@@ -6,6 +6,8 @@ config_dir=/etc/ludus
 libraries_file="$config_dir/libraries.conf"
 default_library_file="$config_dir/default-library.conf"
 webui_config="$config_dir/webui.json"
+mqtt_config="$config_dir/mqtt.json"
+mqtt_status=/run/ludus/mqtt-status.json
 group=ludus
 disks=/usr/local/lib/ludus/ludus-disks
 user_libraries=/usr/local/lib/ludus/ludus-steam-user-libraries
@@ -126,6 +128,29 @@ canonical_path() {
     [[ "$path" != *$'\n'* && "$path" != *$'\r'* ]] || die "library paths cannot contain line breaks"
     [[ -d "$path" ]] || die "library path does not exist: $path"
     realpath -e -- "$path"
+}
+
+# An existing library is deliberately accepted for migrations, but it must be
+# game storage—not an OS or user-data directory.  `prepare_library` changes
+# ownership and mode of the chosen directory, and `repair` recurses through
+# it, so merely requiring an absolute directory is not a safe boundary.
+safe_existing_library_path() {
+    local library=$1 protected candidate_target candidate_source candidate_fstype candidate_default allowed=false
+    library=$(canonical_path "$library")
+    for protected in / /boot /etc /usr /root /home /var/home /var/lib/ludus /run /sys /proc /dev; do
+        [[ "$library" == "$protected" || "$library" == "$protected"/* ]] && die "refusing system or home directory as a shared library: $library"
+    done
+    # Limit adoptions to the same writable local filesystems presented by the
+    # safe disk picker.  In particular, do not make arbitrary directories on
+    # the root filesystem eligible just because they happen to exist.
+    while IFS=$'\t' read -r candidate_target candidate_source candidate_fstype candidate_default; do
+        if [[ "$library" == "$candidate_target"/* ]]; then
+            allowed=true
+            break
+        fi
+    done < <(library_candidates)
+    "$allowed" || die "library must be below a supported writable local filesystem mount"
+    printf '%s\n' "$library"
 }
 
 library_paths() {
@@ -492,7 +517,7 @@ cmd_libraries() {
         candidates) library_candidates ;;
         add)
             require_root; [[ -n "$raw" ]] || die "usage: ludusctl libraries add <absolute-path>"
-            assert_steam_stopped; ensure_config; ensure_group; library=$(canonical_path "$raw")
+            assert_steam_stopped; ensure_config; ensure_group; library=$(safe_existing_library_path "$raw")
             while IFS= read -r path; do [[ "$path" == "$library" ]] && die "library is already configured: $library"; done < <(library_paths)
             prepare_library "$library"
             printf '%s\n' "$library" >> "$libraries_file"
@@ -559,7 +584,7 @@ cmd_doctor() {
     getent group "$group" >/dev/null && report HEALTHY group.present services "$group" '' "group $group exists" || { report ERROR group.missing services "$group" '' "group $group is missing"; result=1; }
     [[ -x /usr/bin/bazzite-steam ]] && report HEALTHY steam-launcher.present services /usr/bin/bazzite-steam '' "Bazzite Steam launcher found" || { report ERROR steam-launcher.missing services /usr/bin/bazzite-steam '' "/usr/bin/bazzite-steam is missing"; result=1; }
     [[ -f "$libraries_file" ]] && report HEALTHY library-config.present services "$libraries_file" '' "library configuration found" || report WARNING library-config.absent services "$libraries_file" '' "no shared libraries configured"
-    for service in ludus.service ludus-mount.service ludus-backend.service ludus-web.service ludus-web-firewall.service; do
+    for service in ludus.service ludus-mount.service ludus-backend.service ludus-web.service ludus-web-firewall.service ludus-mqtt.service; do
         if systemctl is-active --quiet "$service"; then
             report HEALTHY service.active services "$service" '' "$service is active"
         elif systemctl is-enabled --quiet "$service" 2>/dev/null; then
@@ -571,6 +596,20 @@ cmd_doctor() {
     [[ -S /run/ludus-mount/mount.sock ]] && report HEALTHY mount-socket.present services /run/ludus-mount/mount.sock '' "mount control socket exists" || { report WARNING mount-socket.absent services /run/ludus-mount/mount.sock '' "mount control socket is unavailable"; result=1; }
     [[ -S /run/ludus/backend.sock ]] && report HEALTHY backend-socket.present services /run/ludus/backend.sock '' "WebUI backend socket exists" || report WARNING backend-socket.absent services /run/ludus/backend.sock '' "WebUI backend socket is unavailable"
     [[ -r /etc/ludus/webui.json ]] && report HEALTHY webui-config.present services /etc/ludus/webui.json '' "WebUI credential configuration found" || report WARNING webui-config.absent services /etc/ludus/webui.json '' "WebUI credential configuration is unavailable"
+    if [[ -r "$mqtt_config" ]]; then
+        if python3 -c 'import json, sys; sys.exit(not json.load(open(sys.argv[1])).get("enabled", False))' "$mqtt_config"; then
+            report HEALTHY mqtt.enabled network "$mqtt_config" '' "Home Assistant MQTT integration is enabled"
+            if [[ -r "$mqtt_status" ]] && python3 -c 'import json, sys; sys.exit(not json.load(open(sys.argv[1])).get("connected", False))' "$mqtt_status"; then
+                report HEALTHY mqtt.connected network "$mqtt_status" '' "Home Assistant MQTT broker is connected"
+            else
+                report WARNING mqtt.disconnected network "$mqtt_status" '' "Home Assistant MQTT broker is not connected"
+            fi
+        else
+            report HEALTHY mqtt.disabled network "$mqtt_config" '' "Home Assistant MQTT integration is disabled"
+        fi
+    else
+        report WARNING mqtt.config-absent network "$mqtt_config" '' "Home Assistant MQTT configuration is unavailable"
+    fi
     if command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then
         zone=$(cat /etc/ludus/webui-firewall-zone 2>/dev/null || true)
         if [[ -z "$zone" ]]; then

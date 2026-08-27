@@ -115,8 +115,12 @@ The installer starts the management service on port `9876`. It only opens the
 firewall port in a `home`, `internal`, or `trusted` firewalld zone; the WebUI
 itself also admits only loopback and directly connected private IPv4 subnets.
 If the active zone is not one of those private-network zones, configure it
-before enabling LAN access. Open
-`http://<ludus-hostname-or-LAN-IP>:9876/` from a trusted home-network device.
+before enabling LAN access. The built-in server is HTTP-only: HTTP Basic/PAM
+credentials are plaintext on the network. Use it only through a trusted wired
+LAN, an authenticated VPN, or a TLS-terminating reverse proxy—never ordinary
+Wi-Fi or an untrusted network. Open
+`http://<ludus-hostname-or-LAN-IP>:9876/` only when one of those protections
+is in place.
 The WebUI can enrol/remove players, manage existing shared-library directories,
 run safe repair checks, and rotate its own credentials. Removing a player or
 library never deletes a Linux account, game files, or home data.
@@ -142,6 +146,11 @@ request, starts that selected user's normal Ludus session, and resets the
 selector to `Inactive`. Selecting `Inactive` before then clears the pending
 request. Requests expire after two minutes once handed to the greeter and are
 rejected whenever another Ludus session is active.
+
+Only player-selection messages may be retained. Sign out, restart, and shut
+down commands must be non-retained MQTT button messages with payload `PRESS`;
+Ludus rejects and clears retained lifecycle commands to prevent replay after a
+reconnect or reboot.
 
 Use a dedicated broker account with narrowly scoped topic permissions. Anyone
 allowed to publish Ludus commands can start an enrolled account without its

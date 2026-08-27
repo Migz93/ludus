@@ -98,7 +98,7 @@ def unmount_active_session():
         client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         client.settimeout(10)
         client.connect(MOUNT_SOCKET)
-        client.sendall(b'{"action":"unmount-active"}')
+        client.sendall(b'{"action":"unmount-active"}\n')
         client.shutdown(socket.SHUT_WR)
         reply = json.loads(client.recv(4096).decode("utf-8"))
         client.close()
@@ -117,7 +117,6 @@ class LudusMqtt:
         self.pending = ""
         self.dispatched_at = 0.0
         self.client = None
-        self.lock = threading.Lock()
 
     def topic(self, suffix):
         return self.prefix + "/" + suffix
@@ -164,6 +163,10 @@ class LudusMqtt:
         # later reboot and could unexpectedly start another session.
         self.publish("command/start_player", "", retain=True)
 
+    def clear_lifecycle_command(self, command):
+        """Erase a retained destructive command after seeing it."""
+        self.publish("command/" + command, "", retain=True)
+
     def end_session(self, user):
         """Terminate the user and confirm Ludus's private mounts are cleared."""
         subprocess.run(["loginctl", "terminate-user", user], check=False, timeout=30)
@@ -180,8 +183,7 @@ class LudusMqtt:
 
     def discovery(self):
         device = {"identifiers": ["ludus_" + machine_id()], "name": "Ludus",
-                  "manufacturer": "Ludus", "model": "Bazzite lounge console",
-                  "configuration_url": "http://" + socket.gethostname() + ":9876/"}
+                  "manufacturer": "Ludus", "model": "Bazzite lounge console"}
         availability = {"topic": self.topic("state/availability"), "payload_available": "online",
                         "payload_not_available": "offline"}
         base = "homeassistant"
@@ -234,12 +236,17 @@ class LudusMqtt:
         self.last_event = f"Remote start requested for {user}"
         self.publish_state()
 
-    def command(self, topic, payload):
+    def command(self, topic, payload, retained=False):
         suffix = topic.rsplit("/", 1)[-1]
         value = payload.decode("utf-8", "replace").strip()
         if suffix == "start_player":
             self.set_pending(value or INACTIVE)
         elif suffix == "sign_out":
+            if retained or value != "PRESS":
+                self.last_error, self.last_event = "Sign out requires a non-retained PRESS command", "Remote command rejected"
+                if retained: self.clear_lifecycle_command(suffix)
+                self.publish_state()
+                return
             user = active_user()
             if not user:
                 self.last_error, self.last_event = "No Ludus session is active", "Sign out rejected"
@@ -247,8 +254,14 @@ class LudusMqtt:
                 self.last_error, self.last_event = "", f"Signed out {user} and cleared private session data"
             else:
                 self.last_error, self.last_event = "Could not confirm private session cleanup", "Sign out needs attention"
+            self.clear_lifecycle_command(suffix)
             self.publish_state()
         elif suffix in {"reboot", "shutdown"}:
+            if retained or value != "PRESS":
+                self.last_error, self.last_event = f"{suffix.capitalize()} requires a non-retained PRESS command", "Remote command rejected"
+                if retained: self.clear_lifecycle_command(suffix)
+                self.publish_state()
+                return
             user = active_user()
             if user and not self.end_session(user):
                 self.last_error = "Could not confirm private session cleanup; power action cancelled"
@@ -256,6 +269,7 @@ class LudusMqtt:
                 self.publish_state()
                 return
             self.last_event, self.last_error = ("Remote restart requested", "") if suffix == "reboot" else ("Remote shutdown requested", "")
+            self.clear_lifecycle_command(suffix)
             self.publish_state()
             subprocess.Popen(["systemctl", "reboot" if suffix == "reboot" else "poweroff"])
 
@@ -298,7 +312,7 @@ class LudusMqtt:
         self.client.will_set(self.topic("state/availability"), "offline", qos=1, retain=True)
         self.client.on_connect = self.on_connect
         self.client.on_disconnect = self.on_disconnect
-        self.client.on_message = lambda _client, _userdata, message: self.command(message.topic, message.payload)
+        self.client.on_message = lambda _client, _userdata, message: self.command(message.topic, message.payload, message.retain)
         self.client.connect_async(host, port, keepalive=30)
         self.client.loop_start()
         while True:

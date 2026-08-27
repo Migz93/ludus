@@ -8,6 +8,7 @@ import pwd
 import socket
 import struct
 import subprocess
+import time
 
 SOCKET = "/run/ludus/backend.sock"
 GROUP = "ludus-web"
@@ -49,20 +50,29 @@ def peer_ok(connection):
 
 
 def receive(connection):
-    connection.settimeout(5)
+    deadline = time.monotonic() + 5
     chunks, size = [], 0
     while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise RuntimeError("request timed out")
+        connection.settimeout(remaining)
         chunk = connection.recv(min(8192 - size + 1, 4096))
         if not chunk:
-            break
+            raise RuntimeError("incomplete request")
         chunks.append(chunk)
         size += len(chunk)
         if size > 8192:
             raise RuntimeError("invalid request size")
-    data = b"".join(chunks)
-    if not data:
+        data = b"".join(chunks)
+        if b"\n" in data:
+            frame, trailing = data.split(b"\n", 1)
+            if trailing.strip():
+                raise RuntimeError("invalid request framing")
+            break
+    if not frame:
         raise RuntimeError("invalid request size")
-    request = json.loads(data)
+    request = json.loads(frame)
     if not isinstance(request, dict):
         raise RuntimeError("invalid request")
     return request
@@ -288,7 +298,13 @@ def handle(connection):
         response = dispatch(receive(connection))
     except Exception as error:
         response = {"ok": False, "error": str(error)}
-    connection.sendall(json.dumps(response).encode())
+    try:
+        connection.settimeout(5)
+        connection.sendall(json.dumps(response).encode())
+    except OSError:
+        # The WebUI may abandon a long-running request. Its operation can
+        # still complete safely; losing the reply must not kill this daemon.
+        pass
 
 
 def main():

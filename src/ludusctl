@@ -135,21 +135,22 @@ canonical_path() {
 # ownership and mode of the chosen directory, and `repair` recurses through
 # it, so merely requiring an absolute directory is not a safe boundary.
 safe_existing_library_path() {
-    local library=$1 protected candidate_target candidate_source candidate_fstype candidate_default allowed=false
+    local library=$1 candidate_target candidate_source candidate_fstype candidate_default allowed=false var_library_root=/var/srv/steam-library
     library=$(canonical_path "$library")
-    for protected in / /boot /etc /usr /root /home /var/home /var/lib/ludus /run /sys /proc /dev; do
-        [[ "$library" == "$protected" || "$library" == "$protected"/* ]] && die "refusing system or home directory as a shared library: $library"
-    done
-    # Limit adoptions to the same writable local filesystems presented by the
-    # safe disk picker.  In particular, do not make arbitrary directories on
-    # the root filesystem eligible just because they happen to exist.
+    # /var is an OS-managed Bazzite filesystem, so it has one explicit Ludus
+    # storage root. Other candidates are independently mounted filesystems.
+    [[ "$library" == "$var_library_root" || "$library" == "$var_library_root"/* ]] && { printf '%s\n' "$library"; return; }
+    # Existing-library migrations are allowed only below a non-/var writable
+    # local mount presented by the disk picker. This excludes the OS root and
+    # all of its managed trees such as /var/log and /var/lib.
     while IFS=$'\t' read -r candidate_target candidate_source candidate_fstype candidate_default; do
+        [[ "$candidate_target" == /var ]] && continue
         if [[ "$library" == "$candidate_target"/* ]]; then
             allowed=true
             break
         fi
     done < <(library_candidates)
-    "$allowed" || die "library must be below a supported writable local filesystem mount"
+    "$allowed" || die "library must be below /var/srv/steam-library or a supported non-system local filesystem mount"
     printf '%s\n' "$library"
 }
 
@@ -225,7 +226,7 @@ library_candidates() {
         # "disk" would be both confusing and unsafe.
         [[ "$target" == /boot || "$target" == /etc || "$target" == /sysroot* || "$target" == */steamapps/compatdata || "$target" == */steamapps/shadercache ]] && continue
         [[ "$source" != *'['* || "$target" == /var ]] || continue
-        if [[ "$target" == /var ]]; then default=/srv/steam-library; else default="$target/steam-library"; fi
+        if [[ "$target" == /var ]]; then default=/var/srv/steam-library; else default="$target/steam-library"; fi
         [[ "$seen" == *"|$target|"* ]] && continue; seen+="$target|"
         printf '%s\t%s\t%s\t%s\n' "$target" "$source" "$fstype" "$default"
     done < <(findmnt -rn -t btrfs,ext4,xfs -o TARGET,SOURCE,FSTYPE,OPTIONS)

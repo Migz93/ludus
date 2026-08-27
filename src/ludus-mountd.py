@@ -7,6 +7,7 @@ import pwd
 import socket
 import stat
 import subprocess
+import time
 
 SOCKET = "/run/ludus-mount/mount.sock"
 ACTIVE_USER = "/run/ludus-mount/active-user"
@@ -102,19 +103,29 @@ def peer_user(connection):
     return pwd.getpwuid(uid).pw_name
 
 def receive(connection):
-    connection.settimeout(5)
+    deadline = time.monotonic() + 5
     chunks, size = [], 0
     while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise RuntimeError("request timed out")
+        connection.settimeout(remaining)
         chunk = connection.recv(min(4096 - size + 1, 4096))
         if not chunk:
-            break
+            raise RuntimeError("incomplete request")
         chunks.append(chunk)
         size += len(chunk)
         if size > 4096:
             raise RuntimeError("invalid request size")
-    if not chunks:
+        data = b"".join(chunks)
+        if b"\n" in data:
+            frame, trailing = data.split(b"\n", 1)
+            if trailing.strip():
+                raise RuntimeError("invalid request framing")
+            break
+    if not frame:
         raise RuntimeError("invalid request")
-    request = json.loads(b"".join(chunks).decode("utf-8"))
+    request = json.loads(frame.decode("utf-8"))
     if not isinstance(request, dict):
         raise RuntimeError("invalid request")
     return request
@@ -136,7 +147,13 @@ def handle(connection):
         response = {"ok": True}
     except Exception as error:
         response = {"ok": False, "error": str(error)}
-    connection.sendall(json.dumps(response).encode("utf-8"))
+    try:
+        connection.settimeout(5)
+        connection.sendall(json.dumps(response).encode("utf-8"))
+    except OSError:
+        # A group member may close its local client early. Do not let that
+        # terminate the serial mount daemon after the request was handled.
+        pass
 
 os.makedirs(os.path.dirname(SOCKET), mode=0o755, exist_ok=True)
 try: os.unlink(SOCKET)

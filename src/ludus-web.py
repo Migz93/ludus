@@ -1,21 +1,48 @@
 #!/usr/bin/env python3
 """Small authenticated management UI; privileged actions go via ludus-backend."""
-import base64, hashlib, hmac, ipaddress, json, os, secrets, socket, subprocess
+import base64, hashlib, hmac, ipaddress, json, os, secrets, socket, subprocess, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 CONF = "/etc/ludus/webui.json"
 SOCK = "/run/ludus/backend.sock"
 ASSETS = os.path.join(os.path.dirname(os.path.realpath(__file__)), "web")
 MAX_BODY = 8192
+MAX_HTTP_WORKERS = 16
+HTTP_SOCKET_TIMEOUT = 15
+BACKEND_OPERATION_TIMEOUT = 3610
+PAM_RETRY_INTERVAL = 2
+PAM_FAILURES = {}
+PAM_FAILURES_LOCK = threading.Lock()
+
+def allow_pam_attempt(address):
+    """Limit expensive root-side PAM checks from any one LAN peer."""
+    now = time.monotonic()
+    with PAM_FAILURES_LOCK:
+        previous = PAM_FAILURES.get(address, 0)
+        if now - previous < PAM_RETRY_INTERVAL:
+            return False
+        # Keep this small, bounded state even if a hostile LAN sends many
+        # distinct source addresses.
+        if len(PAM_FAILURES) >= 1024 and address not in PAM_FAILURES:
+            PAM_FAILURES.pop(next(iter(PAM_FAILURES)))
+        PAM_FAILURES[address] = now
+        return True
+
+def clear_pam_failure(address):
+    with PAM_FAILURES_LOCK:
+        PAM_FAILURES.pop(address, None)
 
 def cfg():
     with open(CONF, encoding="utf-8") as file:
         return json.load(file)
 
 def call(operation, argument=None):
-    request = json.dumps({"operation": operation, "argument": argument}).encode()
+    request = json.dumps({"operation": operation, "argument": argument}).encode() + b"\n"
     with socket.socket(socket.AF_UNIX) as client:
-        client.settimeout(10)
+        # Some safe administration operations (disk adoption and repair) are
+        # intentionally allowed to take up to an hour in the root backend.
+        # Keep the local client alive for their documented operation window.
+        client.settimeout(BACKEND_OPERATION_TIMEOUT)
         client.connect(SOCK); client.sendall(request); client.shutdown(socket.SHUT_WR)
         chunks = []
         while data := client.recv(8192): chunks.append(data)
@@ -51,7 +78,11 @@ class Handler(BaseHTTPRequestHandler):
         if mode == "local" or mode == "password": return local
         if mode == "pam+local" and local: return True
         if mode in ("pam", "pam+local"):
-            try: return call("webui.pam_auth", {"username": username, "password": password}).get("ok", False)
+            if not allow_pam_attempt(self.client_address[0]): return False
+            try:
+                result = call("webui.pam_auth", {"username": username, "password": password}).get("ok", False)
+                if result: clear_pam_failure(self.client_address[0])
+                return result
             except (OSError, ValueError): return False
         return False
     def send(self, response, code=200, content_type="application/json", extra=()):
@@ -97,7 +128,30 @@ def private_lans():
     except (OSError, ValueError, KeyError, subprocess.CalledProcessError): return []
 
 class LanOnlyServer(ThreadingHTTPServer):
-    def __init__(self, address, handler): self.private_lans = private_lans(); super().__init__(address, handler)
+    daemon_threads = True
+    request_queue_size = MAX_HTTP_WORKERS
+    def __init__(self, address, handler):
+        self.private_lans = private_lans()
+        self.workers = threading.BoundedSemaphore(MAX_HTTP_WORKERS)
+        super().__init__(address, handler)
+    def get_request(self):
+        request, address = super().get_request()
+        request.settimeout(HTTP_SOCKET_TIMEOUT)
+        return request, address
+    def process_request(self, request, client_address):
+        if not self.workers.acquire(blocking=False):
+            request.close()
+            return
+        try:
+            super().process_request(request, client_address)
+        except Exception:
+            self.workers.release()
+            raise
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self.workers.release()
     def verify_request(self, request, client_address):
         peer = ipaddress.ip_address(client_address[0])
         return peer.is_loopback or any(peer in network for network in self.private_lans)

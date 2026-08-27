@@ -156,6 +156,8 @@ Implemented on the Bazzite VM:
 - In active Miguel and Steph sessions, doctor correctly reported the active
   player and all four private bind sources. Validate storage output while a
   player session is active.
+- In the idle state, `ludusctl storage` returned valid capacity records for
+  both configured shared libraries.
 
 ### WebUI redesign: ready to validate
 

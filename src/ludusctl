@@ -368,7 +368,7 @@ prepare_library() {
 }
 
 check_library() {
-    local library=$1 apps actual errors=0 name target user
+    local library=$1 apps actual errors=0 name target user active_user=''
     apps="$library/steamapps"
     [[ -d "$library" ]] || { report ERROR library.missing storage "$library" '' "library missing: $library"; return 1; }
     actual=$(stat -c '%U:%G %a' "$library")
@@ -380,7 +380,12 @@ check_library() {
         target="$apps/$name"
         [[ -d "$target" ]] || { report ERROR bind.missing private "$target" '' "missing private bind target $target"; ((errors+=1)); continue; }
         if [[ "$(findmnt -rn -o TARGET -T "$target" 2>/dev/null | head -n1)" == "$target" ]]; then
-            report WARNING bind.mounted private "$target" '' "$target has an active bind mount"
+            if [[ -r /run/ludus-mount/active-user ]]; then active_user=$(< /run/ludus-mount/active-user); fi
+            if [[ -n "$active_user" ]] && valid_user "$active_user"; then
+                report HEALTHY bind.mounted private "$target" "user=$active_user" "$target has an active private bind mount for $active_user"
+            else
+                report WARNING bind.mounted private "$target" '' "$target has an active bind mount without a valid Ludus player session"
+            fi
         else
             actual=$(stat -c '%U:%G %a' "$target")
             [[ "$actual" == "root:root 0" ]] || { report ERROR bind.permissions private "$target" "actual=$actual" "$target permissions are $actual; expected root:root 0"; ((errors+=1)); }
@@ -615,7 +620,15 @@ cmd_doctor() {
     cmd_libraries check || result=1
     while IFS= read -r user; do
         valid_user "$user" || { report ERROR player.ineligible steam "$user" '' "enrolled user is no longer eligible: $user"; result=1; continue; }
-        if steam_running_for "$user"; then report WARNING steam.running steam "$user" '' "Steam is running for $user"; else report HEALTHY steam.stopped steam "$user" '' "Steam is stopped for $user"; fi
+        if steam_running_for "$user"; then
+            if [[ "$user" == "$active_user" ]]; then
+                report HEALTHY steam.running steam "$user" '' "Steam is running for active player $user"
+            else
+                report WARNING steam.running steam "$user" '' "Steam is running for $user outside the active Ludus session"
+            fi
+        else
+            report HEALTHY steam.stopped steam "$user" '' "Steam is stopped for $user"
+        fi
         if steam_initialized_for "$user"; then
             if "$doctor_json"; then
                 records=$("$user_libraries" check-records "$user") || result=1

@@ -104,8 +104,8 @@ Validated on the Bazzite VM:
 
 Still to validate later:
 
-- Update a real shared game as each player.
-- Exercise Bazzite-update recovery.
+- No further scheduled shared-library validation. Test game updates and
+  Bazzite-update recovery opportunistically when those events occur.
 
 ### Installer and removal lifecycle
 

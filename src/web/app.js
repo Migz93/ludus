@@ -638,7 +638,7 @@ const LEGACY_RULES = [
   { re: /^private bind target (\S+) is locked while idle$/, code: 'bind.locked', s: m => m[1] },
   { re: /^private bind target (\S+) is not locked \((.+)\)$/, code: 'bind.unlocked', s: m => m[1], d: m => ({ actual: m[2] }) },
   { re: /^missing private bind target (\S+)$/, code: 'bind.missing', s: m => m[1] },
-  { re: /^(\S+) has an active bind mount$/, code: 'bind.mounted', s: m => m[1] },
+  { re: /^(\S+) has an active (?:private )?bind mount(?: for \S+)?$/, code: 'bind.mounted', s: m => m[1] },
   { re: /^(\S+) permissions are (.+); expected root:root 0$/, code: 'bind.permissions', s: m => m[1], d: m => ({ actual: m[2] }) },
 
   { re: /^library mount (.+): (\S+) \(([^)]+)\)$/, code: 'library.mounted', s: m => m[1], d: m => ({ device: m[2], fstype: m[3] }) },
@@ -651,7 +651,7 @@ const LEGACY_RULES = [
   { re: /^missing (.+\/steamapps\/(?:common|workshop))$/, code: 'library.folder-missing', s: m => m[1] },
 
   { re: /^enrolled user is no longer eligible: (\S+)$/, code: 'player.ineligible', s: m => m[1] },
-  { re: /^Steam is running for (\S+)$/, code: 'steam.running', s: m => m[1] },
+  { re: /^Steam is running for (?:active player )?(\S+)(?: outside the active Ludus session)?$/, code: 'steam.running', s: m => m[1] },
   { re: /^Steam is stopped for (\S+)$/, code: 'steam.stopped', s: m => m[1] },
   { re: /^Steam registration deferred for (\S+) until their first Steam login$/, code: 'steam.deferred', s: m => m[1] },
   { re: /^Steam registration (\S+): (.+) has all shared libraries(?:; default (.+))?$/, code: 'steam-registration.complete', s: m => m[1], d: m => ({ file: m[2], default: m[3] || '' }) },

@@ -117,6 +117,7 @@ class LudusMqtt:
         self.pending = ""
         self.dispatched_at = 0.0
         self.client = None
+        self.last_published_state = None
 
     def topic(self, suffix):
         return self.prefix + "/" + suffix
@@ -141,6 +142,11 @@ class LudusMqtt:
     def write_status(self):
         atomic_json(STATUS, self.status())
 
+    @staticmethod
+    def state_key(state):
+        """Ignore the per-second timestamp when deciding whether to publish."""
+        return tuple((key, state[key]) for key in sorted(state) if key != "updated_at")
+
     def publish(self, topic, payload, retain=True):
         if self.client and self.connected:
             self.client.publish(self.topic(topic), payload, qos=1, retain=retain)
@@ -154,7 +160,15 @@ class LudusMqtt:
         self.publish("state/requested_player", state["pending_player"])
         self.publish("state/last_error", state["last_error"] or "None")
         self.publish("state/availability", "online" if self.connected else "offline")
+        self.last_published_state = self.state_key(state)
         self.write_status()
+
+    def publish_changed_state(self):
+        state = self.status()
+        if self.connected and self.state_key(state) != self.last_published_state:
+            self.publish_state()
+        else:
+            atomic_json(STATUS, state)
 
     def clear_start_command(self):
         # The player select deliberately publishes retained commands so a
@@ -336,7 +350,7 @@ class LudusMqtt:
                 self.pending = ""; self.dispatched_at = 0.0
                 self.publish_state()
             else:
-                self.write_status()
+                self.publish_changed_state()
             time.sleep(1)
 
 

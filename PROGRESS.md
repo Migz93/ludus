@@ -85,11 +85,27 @@ Validated on the Bazzite VM:
   the shared-library registration and visibility path for Miguel and Steph.
 - Shared libraries persisted through multiple reboots.
 - The Ludus uninstaller was exercised successfully.
+- Miguel and Steph each launched the same shared native game, **Unpacking**.
+  Steph received a clean **New Game** state rather than Miguel's **Resume**
+  state, and her shader cache was created under her own Ludus directory.
+- Miguel and Steph each launched the same shared Proton game, **Ravenous
+  Devils**. Each received a separately owned `compatdata/1615290/pfx` and
+  shader cache in their own home directory. The game exited after a black
+  screen in the software-rendered VM, as expected without a physical GPU.
+- During both active-player sessions, `ludusctl doctor --json` confirmed that
+  all four shared-library private binds pointed only at that active player's
+  own directories. The doctor now resolves Bazzite's equivalent `/home` and
+  `/var/home` spellings before comparing bind targets.
+- A Steam-created `steamapps/downloading` directory initially lacked
+  group-write access for the second player. Library repair now skips Steam
+  Runtime read-only mounts while continuing the repair, and Ludus launches
+  Steam with umask `0002` so future shared downloads and game files retain
+  group-write access. Steph successfully wrote to the repaired directory.
 
 Still to validate later:
 
-- Launch and update real shared games as Miguel and then Steph.
-- Exercise Proton/shader isolation and Bazzite-update recovery.
+- Update a real shared game as each player.
+- Exercise Bazzite-update recovery.
 
 ### Installer and removal lifecycle
 
@@ -137,7 +153,9 @@ Implemented on the Bazzite VM:
   records and exit status zero. This covered all services, firewall access,
   both shared-library mounts and bind targets, both players' Steam
   registrations, SELinux, controller policy, and the optional VS Code policy.
-- Validate doctor and storage output while a player session is active.
+- In active Miguel and Steph sessions, doctor correctly reported the active
+  player and all four private bind sources. Validate storage output while a
+  player session is active.
 
 ### WebUI redesign: ready to validate
 

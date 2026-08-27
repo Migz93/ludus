@@ -371,6 +371,15 @@ const load = {
       username: String(result.username || '')
     };
   }),
+  mqtt: () => cached('mqtt', async () => {
+    const result = requireOk(await api('/api/mqtt'), 'The MQTT settings could not be read.');
+    return {
+      enabled: Boolean(result.enabled), host: String(result.host || ''), port: Number(result.port || 1883),
+      username: String(result.username || ''), passwordSet: Boolean(result.password_set),
+      tls: Boolean(result.tls), caCert: String(result.ca_cert || ''), prefix: String(result.topic_prefix || ''),
+      status: result.status && typeof result.status === 'object' ? result.status : {}
+    };
+  }),
   /* Optional structured storage figures.  The UI degrades quietly when the
      backend does not expose them. */
   storage: () => cached('storage', async () => {
@@ -403,7 +412,8 @@ const SERVICES = {
   'ludus-mount.service': { name: 'Private data service', what: 'Keeps each player’s Proton and shader files separate from other players.' },
   'ludus-backend.service': { name: 'Management service', what: 'Carries out the changes you make on this page.' },
   'ludus-web.service': { name: 'Control panel', what: 'Serves this page to your browser.' },
-  'ludus-web-firewall.service': { name: 'Control panel firewall rule', what: 'Opens only the control panel port on your home network.' }
+  'ludus-web-firewall.service': { name: 'Control panel firewall rule', what: 'Opens only the control panel port on your home network.' },
+  'ludus-mqtt.service': { name: 'Home Assistant MQTT', what: 'Publishes Ludus status and accepts the Home Assistant controls you have enabled.' }
 };
 
 function serviceInfo(unit) {
@@ -460,6 +470,11 @@ const CHECK_COPY = {
   'webui-config.absent': { g: 'services',
     t: () => 'Control panel settings are unreadable',
     x: () => 'The sign-in settings for this page could not be read, so changes on the Settings page may not stick.' },
+  'mqtt.enabled': { g: 'network', t: () => 'Home Assistant MQTT is enabled', x: () => 'Ludus is configured to publish its state and accept Home Assistant controls through MQTT.' },
+  'mqtt.disabled': { g: 'network', t: () => 'Home Assistant MQTT is disabled', x: () => 'The optional Home Assistant integration is turned off, so Ludus makes no MQTT connection.' },
+  'mqtt.connected': { g: 'network', t: () => 'Home Assistant MQTT broker is connected', x: () => 'Ludus can publish session status and receive its Home Assistant controls.' },
+  'mqtt.disconnected': { g: 'network', t: () => 'Home Assistant MQTT broker is not connected', x: () => 'Check the broker details on the MQTT page. Ludus will keep trying to reconnect.' },
+  'mqtt.config-absent': { g: 'network', t: () => 'Home Assistant MQTT settings are unavailable', x: () => 'Ludus cannot read its MQTT settings file. Open the MQTT page and save the broker configuration again.' },
 
   /* ---- network ---- */
   'firewall.open': { g: 'network',
@@ -2046,6 +2061,94 @@ async function confirmVscode(enabled, toggle) {
 }
 
 /* ------------------------------------------------------------------ *
+ * View: MQTT / Home Assistant
+ * ------------------------------------------------------------------ */
+
+async function viewMqtt() {
+  const settings = await load.mqtt();
+  const status = settings.status || {};
+  const enabled = el('input', { type: 'checkbox', checked: settings.enabled ? true : null });
+  const host = el('input', { type: 'text', value: settings.host, placeholder: 'homeassistant.local', spellcheck: 'false' });
+  const port = el('input', { type: 'number', value: String(settings.port), min: '1', max: '65535' });
+  const username = el('input', { type: 'text', value: settings.username, autocomplete: 'off', spellcheck: 'false' });
+  const password = el('input', { type: 'password', placeholder: settings.passwordSet ? 'Leave blank to keep the saved password' : 'Optional', autocomplete: 'new-password' });
+  const tls = el('input', { type: 'checkbox', checked: settings.tls ? true : null });
+  const caCert = el('input', { type: 'text', value: settings.caCert, placeholder: '/etc/pki/ca-trust/source/anchors/broker-ca.pem', spellcheck: 'false' });
+  const prefix = el('input', { type: 'text', value: settings.prefix, placeholder: 'ludus/lounge-pc', spellcheck: 'false' });
+  const save = el('button', { class: 'btn btn-primary', type: 'submit' }, icon('network'), el('span', { text: 'Save MQTT settings' }));
+  const test = el('button', { class: 'btn', type: 'button' }, icon('refresh'), el('span', { text: 'Test connection' }));
+  const fields = el('div', { class: 'form-row form-row-top' },
+    el('div', { class: 'field' }, el('label', { text: 'Broker host' }), host),
+    el('div', { class: 'field' }, el('label', { text: 'Port' }), port),
+    el('div', { class: 'field' }, el('label', { text: 'Username' }), username),
+    el('div', { class: 'field' }, el('label', { text: 'Password' }), password,
+      el('span', { class: 'help', text: settings.passwordSet ? 'A password is saved. Leave this empty to keep it.' : 'Leave empty only when your broker allows it.' }))
+  );
+  const tlsFields = el('div', { class: 'field' }, el('label', { text: 'CA certificate path (optional)' }), caCert,
+    el('span', { class: 'help', text: 'Use this when your MQTT broker has its own certificate authority.' }));
+  const sync = () => { fields.hidden = !enabled.checked; tlsFields.hidden = !enabled.checked || !tls.checked; prefixField.hidden = !enabled.checked; };
+  enabled.addEventListener('change', sync); tls.addEventListener('change', sync);
+  const prefixField = el('div', { class: 'field' }, el('label', { text: 'Topic prefix' }), prefix,
+    el('span', { class: 'help', text: 'Leave blank for a unique prefix based on this machine. Keep this stable after Home Assistant discovers Ludus.' }));
+  // The sync routine needs the field to be in the document fragment first.
+  const settingsForm = el('form', { onSubmit: event => {
+    event.preventDefault();
+    const body = { enabled: enabled.checked, host: host.value.trim(), port: Number(port.value), username: username.value.trim(),
+      tls: tls.checked, ca_cert: caCert.value.trim(), topic_prefix: prefix.value.trim() };
+    if (password.value) body.password = password.value;
+    confirmMqttSave(body, save);
+  } },
+    el('label', { class: 'switch-row' }, enabled,
+      el('div', { class: 'choice-text' }, el('strong', { text: 'Connect Ludus to Home Assistant through MQTT' }),
+        el('span', { text: 'Home Assistant will discover player selection, session status, sign out, restart and shutdown controls automatically.' }))),
+    fields,
+    el('label', { class: 'switch-row' }, tls,
+      el('div', { class: 'choice-text' }, el('strong', { text: 'Use TLS' }), el('span', { text: 'Encrypt the connection to the MQTT broker.' }))),
+    tlsFields,
+    prefixField,
+    el('div', { class: 'actions actions-top' }, save, test)
+  );
+  sync();
+  test.addEventListener('click', () => mutate(test, {
+    path: '/api/mqtt/test', body: {}, busyLabel: 'Testing…', success: 'MQTT broker connection succeeded',
+    failure: 'MQTT broker connection failed'
+  }));
+
+  const connected = status.connected === true;
+  return frag(
+    card(cardHead('Home Assistant MQTT', 'Let Home Assistant see Ludus status and start a selected player after Wake-on-LAN.'),
+      el('div', { class: 'alert', dataset: { tone: settings.enabled ? (connected ? 'ok' : 'warn') : 'info' } },
+        el('span', { class: 'alert-icon' }, icon(settings.enabled ? (connected ? 'ok' : 'warn') : 'info')),
+        el('div', { class: 'alert-body' }, el('strong', { text: !settings.enabled ? 'MQTT integration is turned off' : (connected ? 'Connected to the MQTT broker' : 'Waiting for the MQTT broker') }),
+          el('p', { text: status.last_error || status.last_event || 'Save the broker details here to enable Home Assistant discovery.' }))
+      ), settingsForm),
+    card(cardHead('Current MQTT integration state', 'This is the same local service Home Assistant uses; it does not expose your broker password.'),
+      factList([
+        ['Service', settings.enabled ? (connected ? 'Connected' : 'Enabled, not connected') : 'Disabled'],
+        ['Active player', status.active_player || 'Inactive'],
+        ['Ludus state', humanise(status.state || 'not reported')],
+        ['Pending remote start', status.pending_player || 'Inactive'],
+        ['Topic prefix', status.topic_prefix || settings.prefix || 'Not assigned']
+      ]),
+      assurances('Select Inactive in Home Assistant to clear a pending remote start.', 'A remote request is accepted only while no Ludus player session is active.', 'The broker password is saved locally and is never returned to this page.')
+    )
+  );
+}
+
+async function confirmMqttSave(body, button) {
+  const confirmed = await ask({
+    title: body.enabled ? 'Save and enable Home Assistant MQTT?' : 'Save MQTT settings with the integration off?',
+    icon: 'network', tone: body.enabled ? 'warn' : 'accent', confirmLabel: body.enabled ? 'Save and enable' : 'Save settings',
+    body: frag(el('p', { text: body.enabled ? 'Ludus will connect to this broker and publish Home Assistant discovery data.' : 'Ludus will keep the broker details but make no MQTT connection.' }),
+      reviewList([['Broker', body.host ? `${body.host}:${body.port}` : 'Not configured'], ['TLS', body.tls ? 'On' : 'Off'], ['Topic prefix', body.topic_prefix || 'Machine-specific default']]),
+      assurances('A broker account permitted to send Ludus commands can request passwordless login for enrolled players.', 'Ludus only accepts a remote player request while its player selector is idle.', 'Existing players, games and WebUI settings are not changed.'))
+  });
+  if (!confirmed) return;
+  await mutate(button, { path: '/api/mqtt', body, busyLabel: 'Saving…', success: 'MQTT settings saved',
+    detail: body.enabled ? 'Ludus is reconnecting and will publish Home Assistant discovery shortly.' : 'The MQTT service remains disconnected.', failure: 'MQTT settings could not be saved' });
+}
+
+/* ------------------------------------------------------------------ *
  * Router
  * ------------------------------------------------------------------ */
 
@@ -2055,6 +2158,7 @@ const ROUTES = {
   libraries: { title: 'Libraries', subtitle: 'Where shared games are installed and kept.', render: viewLibraries },
   disks: { title: 'Disk tools', subtitle: 'Attach another drive so Ludus can use it.', render: viewDisks },
   health: { title: 'Health', subtitle: 'What is working, what needs attention, and how to fix it.', render: viewHealth },
+  mqtt: { title: 'MQTT', subtitle: 'Home Assistant status, controls and broker configuration.', render: viewMqtt },
   settings: { title: 'Settings', subtitle: 'Sign-in and compatibility options for this control panel.', render: viewSettings }
 };
 

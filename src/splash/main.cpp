@@ -11,6 +11,8 @@
 
 static bool bigPictureVisible()
 {
+    // ludus-steam performs the Xwayland window check with the compositor's
+    // temporary Xauthority cookie, which is unavailable to this process.
     const QString runtimeDir = QString::fromUtf8(qgetenv("XDG_RUNTIME_DIR"));
     if (!runtimeDir.isEmpty() && QFile::exists(runtimeDir + QStringLiteral("/ludus-steam-ready"))) {
         return true;
@@ -50,6 +52,10 @@ int main(int argc, char **argv)
     anchors.setFlag(LayerShellQt::Window::AnchorRight);
     layerSurface->setAnchors(anchors);
     layerSurface->setLayer(LayerShellQt::Window::LayerOverlay);
+    // The default exclusive zone (0) lets KWin move this surface out of the
+    // way of panels. -1 keeps it extending to every anchored output edge,
+    // including behind the taskbar.
+    layerSurface->setExclusiveZone(-1);
     layerSurface->setKeyboardInteractivity(LayerShellQt::Window::KeyboardInteractivityExclusive);
     // Qt's showFullScreen() uses Plasma's work area, which excludes panels.
     // A layer-shell surface must instead be explicitly sized to the physical

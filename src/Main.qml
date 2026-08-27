@@ -35,6 +35,26 @@ Item {
             else PlasmaLogin.SessionManagement.requestReboot(PlasmaLogin.SessionManagement.ConfirmationMode.Skip)
         } else select()
     }
+    // The MQTT service can place one validated, root-owned request in the
+    // greeter bridge.  It is still checked against this filtered UserModel,
+    // so a broker command can never login an account Ludus does not display.
+    Timer {
+        interval: 500
+        running: !root.loggingIn
+        repeat: true
+        onTriggered: {
+            const requested = PlasmaLogin.RemoteLogin.takeRequestedUser()
+            if (!requested.length) return
+            const index = PlasmaLogin.UserModel.indexOfData(requested, PlasmaLogin.UserModel.NameRole)
+            if (index < 0) return
+            root.selectedIndex = index
+            // Do not depend on ListView.currentItem updating between this
+            // timer tick and the login request; the validated model name is
+            // the actual account Plasma Login should start.
+            root.loggingIn = true
+            PlasmaLogin.GreeterState.handleLoginRequest(requested, "", 1, "ludus.desktop")
+        }
+    }
     Keys.onLeftPressed: move(-1)
     Keys.onRightPressed: move(1)
     Keys.onDownPressed: { if (!loggingIn) powerFocused = true }

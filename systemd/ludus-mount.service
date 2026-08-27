@@ -8,6 +8,10 @@ ExecStart=/usr/local/lib/ludus/ludus-mountd
 Restart=on-failure
 RuntimeDirectory=ludus-mount
 RuntimeDirectoryMode=0755
+# The active-session marker must survive a service restart.  It is the source
+# of truth for the private bind mounts and lets remote shutdown cleanly finish
+# an already-running player's session.
+RuntimeDirectoryPreserve=restart
 NoNewPrivileges=yes
 
 [Install]

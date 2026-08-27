@@ -32,8 +32,12 @@ for _ in $(seq 1 300); do
             umask 0002
             /usr/bin/bazzite-steam steam://open/bigpicture &
             steam_pid=$!
+            # The splash does not have Xwayland's per-session credentials, so
+            # it cannot run wmctrl itself. Signal it only after the actual
+            # Big Picture/Gamepad UI window—not an early generic web helper—
+            # has appeared.
             for _ in $(seq 1 450); do
-                if /usr/bin/wmctrl -lx 2>/dev/null | grep -qiE 'steam.*(big picture|gamepadui)|steamwebhelper.*steam'; then
+                if /usr/bin/wmctrl -lx 2>/dev/null | grep -qiE 'steam.*(big picture|gamepadui)'; then
                     : > "$ready_file"
                     break
                 fi

@@ -96,10 +96,10 @@ back in after their group membership changes.
 
 ### Open The WebUI
 
-The installer starts the management WebUI on port `9876`:
+The installer starts the management WebUI on port `9304`:
 
 ```text
-http://<ludus-hostname-or-LAN-IP>:9876/
+http://<ludus-hostname-or-LAN-IP>:9304/
 ```
 
 It defaults to local `wheel` administrator PAM authentication. The built-in

@@ -57,8 +57,8 @@ if [[ -f /etc/fstab ]] && grep -q '^# Ludus managed shared-library disk$' /etc/f
   mv -f "$fstab_tmp" /etc/fstab
 fi
 if command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then
-  if [[ -r /etc/ludus/webui-firewall-zone ]]; then
-    firewall-cmd --permanent --zone="$(cat /etc/ludus/webui-firewall-zone)" --remove-port=9876/tcp >/dev/null 2>&1 || true
+  if [[ -r /etc/ludus/webui-firewall-zone && -e /etc/ludus/webui-firewall-port-owned ]]; then
+    firewall-cmd --permanent --zone="$(cat /etc/ludus/webui-firewall-zone)" --remove-port=9304/tcp >/dev/null 2>&1 || true
   fi
   firewall-cmd --reload >/dev/null 2>&1 || true
 fi
@@ -70,7 +70,7 @@ rm -f /etc/systemd/system/ludus-backend.service
 rm -f /etc/systemd/system/ludus-web.service
 rm -f /etc/systemd/system/ludus-web-firewall.service
 rm -f /etc/systemd/system/ludus-mqtt.service
-rm -f /etc/ludus/webui-firewall-zone /etc/pam.d/ludus-web
+rm -f /etc/ludus/webui-firewall-zone /etc/ludus/webui-firewall-port-owned /etc/pam.d/ludus-web
 semodule -r ludus_vscode_ssh >/dev/null 2>&1 || true
 semodule -r ludus_controller >/dev/null 2>&1 || true
 semanage fcontext -d /usr/local/lib/ludus/ludus-controller-bridge >/dev/null 2>&1 || true
@@ -96,3 +96,4 @@ rm -f /usr/local/bin/ludusctl
 rm -rf /usr/local/lib/ludus /etc/ludus
 systemctl daemon-reload
 echo "Ludus removed. Normal Plasma Login is restored; restart plasmalogin or reboot when safe."
+echo "Ludus build dependencies layered with rpm-ostree were intentionally kept. To remove only packages you no longer need, run rpm-ostree status, then sudo rpm-ostree uninstall <package...> and reboot."

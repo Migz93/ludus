@@ -11,7 +11,9 @@ MAX_HTTP_WORKERS = 16
 HTTP_SOCKET_TIMEOUT = 15
 BACKEND_OPERATION_TIMEOUT = 3610
 PAM_RETRY_INTERVAL = 2
+PAM_SUCCESS_TTL = 300
 PAM_FAILURES = {}
+PAM_SUCCESSES = {}
 PAM_FAILURES_LOCK = threading.Lock()
 
 def allow_pam_attempt(address):
@@ -31,6 +33,31 @@ def allow_pam_attempt(address):
 def clear_pam_failure(address):
     with PAM_FAILURES_LOCK:
         PAM_FAILURES.pop(address, None)
+
+def recent_pam_success(address, authorization):
+    """Accept parallel browser requests after one PAM check has succeeded.
+
+    Basic authentication attaches the same Authorization value to every API
+    request.  The dashboard loads several APIs together, so treating a second
+    valid request as a retry makes browsers such as Edge show another password
+    prompt.  Keep only a short hash, bound to the client address, in memory.
+    """
+    fingerprint = hashlib.sha256(authorization.encode()).digest()
+    now = time.monotonic()
+    with PAM_FAILURES_LOCK:
+        expiry = PAM_SUCCESSES.get((address, fingerprint), 0)
+        if expiry > now:
+            return True
+        PAM_SUCCESSES.pop((address, fingerprint), None)
+        return False
+
+def remember_pam_success(address, authorization):
+    fingerprint = hashlib.sha256(authorization.encode()).digest()
+    with PAM_FAILURES_LOCK:
+        PAM_FAILURES.pop(address, None)
+        if len(PAM_SUCCESSES) >= 1024:
+            PAM_SUCCESSES.pop(next(iter(PAM_SUCCESSES)))
+        PAM_SUCCESSES[(address, fingerprint)] = time.monotonic() + PAM_SUCCESS_TTL
 
 def cfg():
     with open(CONF, encoding="utf-8") as file:
@@ -78,10 +105,11 @@ class Handler(BaseHTTPRequestHandler):
         if mode == "local" or mode == "password": return local
         if mode == "pam+local" and local: return True
         if mode in ("pam", "pam+local"):
+            if recent_pam_success(self.client_address[0], auth): return True
             if not allow_pam_attempt(self.client_address[0]): return False
             try:
                 result = call("webui.pam_auth", {"username": username, "password": password}).get("ok", False)
-                if result: clear_pam_failure(self.client_address[0])
+                if result: remember_pam_success(self.client_address[0], auth)
                 return result
             except (OSError, ValueError): return False
         return False
@@ -119,7 +147,7 @@ class Handler(BaseHTTPRequestHandler):
         operation, field = route; self.send(call(operation, body if operation in {"disks.mount", "libraries.label"} or field is None else body.get(field)))
 
 def main():
-    config = cfg(); LanOnlyServer((config.get("listen", "0.0.0.0"), int(config.get("port", 9876))), Handler).serve_forever()
+    config = cfg(); LanOnlyServer((config.get("listen", "0.0.0.0"), int(config.get("port", 9304))), Handler).serve_forever()
 
 def private_lans():
     try:

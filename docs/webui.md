@@ -2,7 +2,7 @@
 
 ## Access Model
 
-The management WebUI listens on port `9876`. It is intended for a trusted wired
+The management WebUI listens on port `9304`. It is intended for a trusted wired
 LAN, authenticated VPN, or TLS-terminating reverse proxy — never exposure to
 the public internet or an untrusted Wi-Fi network.
 

@@ -6,6 +6,16 @@ project_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 install_root=/usr/local/lib/ludus
 unit_dir=/etc/systemd/system
 config_dir=/etc/ludus
+install_completed=false
+
+cleanup_install() {
+  local status=$?
+  rm -rf "$build_dir"
+  if (( status != 0 )) && [[ "$install_completed" != true ]]; then
+    echo "Installation did not complete. No automatic rollback was attempted; after resolving the error, rerun sudo ./install.sh or sudo ./uninstall.sh." >&2
+  fi
+  exit "$status"
+}
 
 reboot_into_staged_deployment() {
   echo
@@ -80,7 +90,7 @@ for file in /etc/pam.d/plasmalogin /etc/pam.d/plasmalogin-ludus /etc/systemd/use
 done
 
 build_dir=$(mktemp -d /var/tmp/ludus-build.XXXXXX)
-trap 'rm -rf "$build_dir"' EXIT
+trap cleanup_install EXIT
 git clone --depth 1 --branch "v$expected_plasma_login" https://invent.kde.org/plasma/plasma-login-manager.git "$build_dir/source"
 install -m 0644 "$project_dir/src/Main.qml" "$build_dir/source/src/frontend/greeter/qml/Main.qml"
 git -C "$build_dir/source" apply "$project_dir/patches/0001-only-show-ludus-members.patch"
@@ -161,10 +171,34 @@ if [[ ! -e "$config_dir/webui.json" ]] || python3 -c 'import json, sys; sys.exit
   # PAM service ludus-web authorizes only members of the local wheel group.
   # Upgrade old unauthenticated configurations to that secure default too.
   webui_config_tmp=$(mktemp "$config_dir/webui.XXXXXX")
-  printf '%s\n' '{"auth_mode":"pam","listen":"0.0.0.0","port":9876}' > "$webui_config_tmp"
+  printf '%s\n' '{"auth_mode":"pam","listen":"0.0.0.0","port":9304}' > "$webui_config_tmp"
   chown root:ludus-web "$webui_config_tmp"; chmod 0640 "$webui_config_tmp"
   mv -f "$webui_config_tmp" "$config_dir/webui.json"
 fi
+# The port is not user-configurable through the WebUI.  Make upgrades follow
+# the current supported endpoint without discarding authentication settings.
+python3 - "$config_dir/webui.json" <<'PY'
+import json
+import os
+import stat
+import sys
+import tempfile
+
+path = sys.argv[1]
+with open(path, encoding="utf-8") as source:
+    config = json.load(source)
+if not isinstance(config, dict):
+    raise SystemExit("webui configuration must be a JSON object")
+if config.get("port") != 9304:
+    metadata = os.stat(path)
+    config["port"] = 9304
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=os.path.dirname(path), delete=False) as temporary:
+        json.dump(config, temporary, separators=(",", ":")); temporary.write("\n")
+        name = temporary.name
+    os.chmod(name, stat.S_IMODE(metadata.st_mode))
+    os.chown(name, metadata.st_uid, metadata.st_gid)
+    os.replace(name, path)
+PY
 [[ -e "$config_dir/libraries.conf" ]] || install -m 0644 /dev/null "$config_dir/libraries.conf"
 if [[ ! -e "$config_dir/mqtt.json" ]]; then
   printf '%s\n' '{"enabled":false,"host":"","port":1883,"username":"","password":"","tls":false,"ca_cert":"","topic_prefix":""}' > "$config_dir/mqtt.json"
@@ -175,8 +209,8 @@ fi
 autostart_state="$config_dir/steam-autostart-users"
 autostart_backups="$config_dir/steam-autostart-backups"
 install -d -m 0700 "$autostart_backups"
-for user in $(getent group ludus | awk -F: '{print $4}' | tr ',' ' '); do
-  home_dir=$(getent passwd "$user" | cut -d: -f6)
+while IFS=: read -r user _ _ _ _ home_dir _; do
+  id -nG "$user" | tr ' ' '\n' | grep -Fxq ludus || continue
   [[ -n "$home_dir" && -d "$home_dir" ]] || continue
   install -d -o "$user" -g "$(id -gn "$user")" -m 0755 "$home_dir/.config/autostart"
   autostart_file="$home_dir/.config/autostart/steam.desktop"
@@ -197,7 +231,7 @@ for user in $(getent group ludus | awk -F: '{print $4}' | tr ',' ' '); do
   printf '%s\n' '[Desktop Entry]' 'Hidden=true' > "$autostart_file"
   chown "$user:$(id -gn "$user")" "$autostart_file"
   chmod 0644 "$autostart_file"
-done
+done < <(getent passwd)
 # Insert an idempotent, narrowly scoped PAM include before password-auth.
 if [[ ! -e /etc/pam.d/plasmalogin ]]; then
   install -m 0644 /usr/lib/pam.d/plasmalogin /etc/pam.d/plasmalogin
@@ -223,4 +257,5 @@ systemctl enable --now ludus-mqtt.service
 systemctl restart ludus-mqtt.service
 systemctl restart ludus-backend.service ludus-web.service ludus-web-firewall.service
 restart_plasmalogin
+install_completed=true
 echo "Backup: $backup"

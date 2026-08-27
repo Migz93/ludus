@@ -9,7 +9,7 @@
 | Supported OS | Normal Bazzite Desktop KDE / Fedora Atomic |
 | Display/login manager | Plasma Login Manager |
 | Steam launcher | `/usr/bin/bazzite-steam` |
-| Management WebUI port | `9876` |
+| Management WebUI port | `9304` |
 | Installer | `sudo ./install.sh` |
 | Uninstaller | `sudo ./uninstall.sh` |
 
@@ -80,4 +80,6 @@ sudo systemctl restart plasmalogin
 
 Removal restores Ludus-managed login configuration and removes Ludus config,
 but intentionally leaves the `ludus` group, Linux accounts, game data, Steam
-library registrations, and timestamped backups intact.
+library registrations, timestamped backups, and rpm-ostree build dependencies
+intact. Review `rpm-ostree status` and deliberately uninstall any dependencies
+you no longer need, then reboot.

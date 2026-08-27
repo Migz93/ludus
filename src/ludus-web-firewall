@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Expose only the Ludus WebUI port. Never assign sources to a zone.
 set -Eeuo pipefail
-port=9876
+port=9304
 state=/etc/ludus/webui-firewall-zone
+ownership=/etc/ludus/webui-firewall-port-owned
 if ! firewall-cmd --state >/dev/null 2>&1; then
     echo "ludus-web-firewall: firewalld is not active; no port was opened" >&2
     exit 0
@@ -20,7 +21,13 @@ case "$zone" in
         exit 1
         ;;
 esac
-firewall-cmd --permanent --zone="$zone" --add-port="$port/tcp" >/dev/null
+if ! firewall-cmd --permanent --zone="$zone" --query-port="$port/tcp" >/dev/null; then
+    firewall-cmd --permanent --zone="$zone" --add-port="$port/tcp" >/dev/null
+    # Uninstall may remove only a rule Ludus knows it added.  Do not claim an
+    # administrator's pre-existing rule merely because it uses this port.
+    install -d -m 0755 /etc/ludus
+    : > "$ownership"
+fi
 install -d -m 0755 /etc/ludus
 printf '%s\n' "$zone" > "$state"
 firewall-cmd --reload

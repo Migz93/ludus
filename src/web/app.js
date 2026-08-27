@@ -616,7 +616,7 @@ const CHECK_COPY = {
 };
 
 function port(record) {
-  return String(record.data.port || '9876/tcp').split('/')[0];
+  return String(record.data.port || '9304/tcp').split('/')[0];
 }
 
 /* An install whose ludusctl predates `doctor --json` still returns the text

@@ -16,7 +16,7 @@ particular kind of work belongs in `docs/` instead.
 |---|---|
 | App name | `ludus` |
 | Supported platform | Bazzite Desktop KDE on Fedora Atomic |
-| Management WebUI port | `9876` |
+| Management WebUI port | `9304` |
 | Primary configuration | `/etc/ludus` |
 | Runtime state | `/run/ludus` and `/run/ludus-mount` |
 | Installed program path | `/usr/local/lib/ludus` |

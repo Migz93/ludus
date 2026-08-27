@@ -323,7 +323,10 @@ assert_steam_stopped() {
 }
 
 enrolled_users() {
-    getent group "$group" | awk -F: '{gsub(/,/, "\n", $4); print $4}' | sed '/^$/d'
+    local user
+    while IFS=: read -r user _ _ _ _ _ _; do
+        id -nG "$user" | tr ' ' '\n' | grep -Fxq "$group" && printf '%s\n' "$user"
+    done < <(getent passwd)
 }
 
 ensure_group() { getent group "$group" >/dev/null || groupadd --system "$group"; }
@@ -615,10 +618,10 @@ cmd_doctor() {
         zone=$(cat /etc/ludus/webui-firewall-zone 2>/dev/null || true)
         if [[ -z "$zone" ]]; then
             report WARNING firewall.zone-unrecorded network '' '' "WebUI firewall zone has not been recorded"
-        elif firewall-cmd --zone="$zone" --query-port=9876/tcp >/dev/null 2>&1; then
-            report HEALTHY firewall.open network "$zone" 'port=9876/tcp' "WebUI port 9876/tcp is open in active zone $zone"
+        elif firewall-cmd --zone="$zone" --query-port=9304/tcp >/dev/null 2>&1; then
+            report HEALTHY firewall.open network "$zone" 'port=9304/tcp' "WebUI port 9304/tcp is open in active zone $zone"
         else
-            report WARNING firewall.closed network "$zone" 'port=9876/tcp' "WebUI port 9876/tcp is not open in recorded zone $zone"
+            report WARNING firewall.closed network "$zone" 'port=9304/tcp' "WebUI port 9304/tcp is not open in recorded zone $zone"
         fi
     else
         report WARNING firewall.unavailable network '' '' "firewalld is unavailable; WebUI LAN access could not be constrained"

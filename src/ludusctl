@@ -409,9 +409,15 @@ repair_library() {
     prepare_library "$library"
     apps="$library/steamapps"
     # Do not traverse other mounted filesystems or touch the private bind targets.
-    while IFS= read -r -d '' path; do chgrp "$group" "$path"; chmod g+rwX "$path"; done \
-        < <(find "$library" -xdev \( -path "$apps/compatdata" -o -path "$apps/shadercache" \) -prune -o -print0)
-    find "$library" -xdev -type d \( -path "$apps/compatdata" -o -path "$apps/shadercache" \) -prune -o -exec chmod g+s {} +
+    # Steam Runtime can expose read-only bind mounts beneath a library.  Skip
+    # those (and symlinks) but continue repairing the actual shared content,
+    # including Steam-created download directories.
+    while IFS= read -r -d '' path; do
+        [[ -L "$path" ]] && continue
+        chgrp --no-dereference "$group" "$path" 2>/dev/null || continue
+        chmod g+rwX "$path" 2>/dev/null || true
+        [[ -d "$path" ]] && chmod g+s "$path" 2>/dev/null || true
+    done < <(find "$library" -xdev \( -path "$apps/compatdata" -o -path "$apps/shadercache" \) -prune -o -print0)
     # A setgid library root can make the marker inherit a setgid bit. It is a
     # regular metadata file, not a shared executable, so keep only group write.
     chmod g-s "$library/libraryfolder.vdf" 2>/dev/null || true

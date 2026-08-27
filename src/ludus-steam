@@ -25,6 +25,11 @@ for _ in $(seq 1 300); do
             # Register shared libraries while Steam is stopped.  The helper is
             # deliberately unprivileged: it only writes this user's Steam VDF.
             /usr/local/lib/ludus/ludus-steam-register-libraries || true
+            # Shared library directories inherit the ludus group through
+            # setgid, but Steam's usual umask would remove group-write access
+            # from new downloads and game files.  Preserve it for the next
+            # player by passing Steam a cooperative group-writable umask.
+            umask 0002
             /usr/bin/bazzite-steam steam://open/bigpicture &
             steam_pid=$!
             for _ in $(seq 1 450); do

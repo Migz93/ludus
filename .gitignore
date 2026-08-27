@@ -7,6 +7,17 @@ cmake-build-*/
 *.rcc
 __pycache__/
 *.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Generated SELinux policy artefacts
+*.mod
+*.pp
+
+# Local environment state
+.direnv/
 
 # Qt, editor, and OS metadata
 .qt/
@@ -15,6 +26,8 @@ __pycache__/
 .vscode/
 .idea/
 *.swp
+*.tmp
+*.bak
 *~
 .DS_Store
 

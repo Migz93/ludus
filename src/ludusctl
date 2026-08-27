@@ -5,6 +5,7 @@ set -Eeuo pipefail
 config_dir=/etc/ludus
 libraries_file="$config_dir/libraries.conf"
 default_library_file="$config_dir/default-library.conf"
+webui_config="$config_dir/webui.json"
 group=ludus
 disks=/usr/local/lib/ludus/ludus-disks
 user_libraries=/usr/local/lib/ludus/ludus-steam-user-libraries
@@ -627,6 +628,13 @@ cmd_doctor() {
             [[ "$actual" == *:ludus_controller_exec_t:* ]] && report HEALTHY selinux.controller-ok security ludus_controller "label=$actual" "controller SELinux policy and executable label are installed" || { report ERROR selinux.controller-mislabelled security ludus_controller "label=${actual:-missing}" "controller executable SELinux label is ${actual:-missing}"; result=1; }
         else
             report ERROR selinux.controller-missing security ludus_controller '' "controller SELinux policy is not installed"; result=1
+        fi
+        if [[ -r "$webui_config" ]] && python3 -c 'import json, sys; sys.exit(not json.load(open(sys.argv[1])).get("vscode_ssh_forwarding", False))' "$webui_config"; then
+            if semodule -l 2>/dev/null | awk '$1 == "ludus_vscode_ssh" { found=1 } END { exit !found }'; then
+                report HEALTHY selinux.vscode-ok security ludus_vscode_ssh '' "VS Code Remote SSH forwarding policy is installed"
+            else
+                report ERROR selinux.vscode-missing security ludus_vscode_ssh '' "VS Code Remote SSH forwarding is enabled in Ludus, but its SELinux policy is not installed"; result=1
+            fi
         fi
     else
         report WARNING selinux.unavailable security '' '' "SELinux tools are unavailable; controller policy could not be checked"

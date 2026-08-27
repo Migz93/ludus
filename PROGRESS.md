@@ -1,6 +1,6 @@
 # Ludus progress
 
-Updated: 2026-08-26
+Updated: 2026-08-27
 
 ## Goal
 
@@ -83,12 +83,13 @@ Validated on the Bazzite VM:
 - A real shared game was installed and uninstalled by each player in turn.
   It appeared correctly for the other player in both directions, confirming
   the shared-library registration and visibility path for Miguel and Steph.
+- Shared libraries persisted through multiple reboots.
+- The Ludus uninstaller was exercised successfully.
 
 Still to validate later:
 
 - Launch and update real shared games as Miguel and then Steph.
-- Exercise Workshop content, Proton/shader isolation, repair, reboot
-  persistence, uninstall, and Bazzite-update recovery.
+- Exercise Proton/shader isolation and Bazzite-update recovery.
 
 ### Installer and removal lifecycle
 
@@ -119,7 +120,7 @@ Implemented on the Bazzite VM:
   source range to a custom Ludus zone. The WebUI also restricts requests to
   loopback and directly connected private LANs.
 
-### Doctor and diagnostics: ready to validate
+### Doctor and diagnostics
 
 - `ludusctl doctor` no longer checks the obsolete `ludus` firewalld zone. It
   reports the recorded active firewall zone, mount sources/filesystems, private
@@ -132,7 +133,11 @@ Implemented on the Bazzite VM:
   supplies the Steam registration records the same way.
 - `ludusctl storage` reports per-library capacity and free space as JSON via
   the read-only `ludus-storage` helper. It changes nothing.
-- Validate its output on the Bazzite VM in both idle and active-player states.
+- In the idle state, root's `ludusctl doctor --json` returned 32 healthy
+  records and exit status zero. This covered all services, firewall access,
+  both shared-library mounts and bind targets, both players' Steam
+  registrations, SELinux, controller policy, and the optional VS Code policy.
+- Validate doctor and storage output while a player session is active.
 
 ### WebUI redesign: ready to validate
 
@@ -166,12 +171,10 @@ step, CDN or external icon service.
 - The page response adds a Content-Security-Policy with a per-request script
   nonce, plus `Referrer-Policy: no-referrer`. Both are additive hardening.
 
-Validate on the Bazzite VM in idle and active-player states, and confirm that
-every doctor line is recognised rather than falling back to raw text.
+Validate the dashboard in an active-player state, and confirm that every
+doctor line is recognised rather than falling back to raw text.
 
 ## Other remaining work
 
 - The repository now includes the GPL-3.0-or-later licence text. Retain
   applicable upstream notices as the project incorporates upstream work.
-- Improve WebUI authentication with sessions and rate limiting if the project
-  later needs stronger LAN-facing security.

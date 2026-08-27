@@ -360,7 +360,16 @@ const load = {
   personal: () => cached('personal', async () => parseJsonOutput(await api('/api/users/personal-libraries'))),
   settings: () => cached('settings', async () => {
     const result = await api('/api/settings');
-    return { authMode: result.auth_mode || 'none', vscode: Boolean(result.vscode_ssh_forwarding), username: String(result.username || '') };
+    return {
+      authMode: result.auth_mode || 'none',
+      // `vscode` is the live policy state; requested records the saved choice.
+      // Older Ludus backends expose only the former, so retain that fallback.
+      vscode: Boolean(result.vscode_ssh_forwarding),
+      vscodeRequested: 'vscode_ssh_forwarding_requested' in result
+        ? Boolean(result.vscode_ssh_forwarding_requested)
+        : Boolean(result.vscode_ssh_forwarding),
+      username: String(result.username || '')
+    };
   }),
   /* Optional structured storage figures.  The UI degrades quietly when the
      backend does not expose them. */
@@ -580,6 +589,12 @@ const CHECK_COPY = {
   'selinux.controller-missing': { g: 'security',
     t: () => 'Controller security policy is missing',
     x: () => 'The security rules for the gamepad helper are not loaded, so controller navigation at the login screen may not work.' },
+  'selinux.vscode-ok': { g: 'security',
+    t: () => 'VS Code forwarding is ready',
+    x: () => 'The optional SELinux rule that VS Code Remote SSH needs is installed.' },
+  'selinux.vscode-missing': { g: 'security',
+    t: () => 'VS Code forwarding needs repair',
+    x: () => 'Ludus is configured to allow VS Code Remote SSH forwarding, but the SELinux rule is missing. Open Settings and choose Repair VS Code forwarding.' },
   'selinux.unavailable': { g: 'security',
     t: () => 'SELinux could not be checked',
     x: () => 'The SELinux tools are not present, so Ludus cannot confirm its security policy is in place.' }
@@ -651,6 +666,8 @@ const LEGACY_RULES = [
   { re: /^controller SELinux policy and executable label are installed$/, code: 'selinux.controller-ok' },
   { re: /^controller executable SELinux label is (.+)$/, code: 'selinux.controller-mislabelled', d: m => ({ label: m[1] }) },
   { re: /^controller SELinux policy is not installed$/, code: 'selinux.controller-missing' },
+  { re: /^VS Code Remote SSH forwarding policy is installed$/, code: 'selinux.vscode-ok' },
+  { re: /^VS Code Remote SSH forwarding is enabled in Ludus, but its SELinux policy is not installed$/, code: 'selinux.vscode-missing' },
   { re: /^SELinux tools are unavailable; controller policy could not be checked$/, code: 'selinux.unavailable' }
 ];
 
@@ -1908,6 +1925,16 @@ function compatibilityCard(settings) {
 
   return card(
     cardHead('Compatibility', 'Optional adjustments for specific development tools. Leave these off unless you need them.'),
+    settings.vscodeRequested && !settings.vscode
+      ? el('div', { class: 'alert', dataset: { tone: 'err' } },
+        el('span', { class: 'alert-icon' }, icon('warn')),
+        el('div', { class: 'alert-body' },
+          el('strong', { text: 'VS Code forwarding needs repair' }),
+          el('p', { text: 'It is enabled in Ludus, but its SELinux rule is not currently installed. VS Code Remote SSH will not work until that rule is restored.' }),
+          el('div', { class: 'actions actions-top' }, vscodeRepairButton())
+        )
+      )
+      : null,
     el('label', { class: 'switch-row' },
       toggle,
       el('div', { class: 'choice-text' },
@@ -1919,6 +1946,19 @@ function compatibilityCard(settings) {
       el('pre', { class: 'raw', text: 'Loads or removes the SELinux policy module ludus_vscode_ssh\n(/usr/local/lib/ludus/ludus_vscode_ssh.pp) and records the choice in\n/etc/ludus/webui.json as vscode_ssh_forwarding.' }),
       'card-disclosure')
   );
+}
+
+function vscodeRepairButton() {
+  const button = el('button', { class: 'btn btn-sm btn-primary', type: 'button' },
+    icon('wrench'), el('span', { text: 'Repair VS Code forwarding' }));
+  button.addEventListener('click', () => mutate(button, {
+    path: '/api/settings/vscode-forwarding/repair',
+    busyLabel: 'Repairing…',
+    success: 'VS Code forwarding repaired',
+    detail: 'The selected SELinux compatibility rule has been restored.',
+    failure: 'VS Code forwarding could not be repaired'
+  }));
+  return button;
 }
 
 async function confirmAuthMode(mode, button) {

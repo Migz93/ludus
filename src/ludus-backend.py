@@ -102,6 +102,15 @@ def set_authentication_mode(argument):
     write_config(config)
     return {"ok": True, "output": "WebUI authentication mode updated."}
 
+def vscode_policy_installed():
+    """Return whether the optional VS Code SELinux policy is active."""
+    result = subprocess.run(["semodule", "-l"], text=True, capture_output=True,
+                            timeout=30, check=False)
+    return result.returncode == 0 and any(
+        line.split(maxsplit=1)[0] == "ludus_vscode_ssh"
+        for line in result.stdout.splitlines() if line.split()
+    )
+
 def set_vscode_forwarding(argument):
     if not isinstance(argument, bool): raise RuntimeError("invalid VS Code setting")
     if argument:
@@ -112,6 +121,17 @@ def set_vscode_forwarding(argument):
     config["vscode_ssh_forwarding"] = argument
     write_config(config)
     return {"ok": True, "output": "VS Code Remote SSH forwarding setting updated."}
+
+def repair_vscode_forwarding():
+    """Restore the policy only when the administrator has opted into it."""
+    with open(WEB_CONFIG, encoding="utf-8") as config_file:
+        config = json.load(config_file)
+    if not config.get("vscode_ssh_forwarding", False):
+        raise RuntimeError("VS Code Remote SSH forwarding is turned off in Settings")
+    subprocess.run(["semodule", "-i", VSCODE_POLICY], check=True, timeout=30)
+    if not vscode_policy_installed():
+        raise RuntimeError("the VS Code SELinux policy could not be confirmed after repair")
+    return {"ok": True, "output": "VS Code Remote SSH forwarding policy restored."}
 
 def pam_authentication(argument):
     if not isinstance(argument, dict): raise RuntimeError("invalid PAM credentials")
@@ -130,7 +150,13 @@ def dispatch(request):
         # The username is not a secret (it is sent openly on every sign-in
         # attempt); exposing it lets the WebUI pre-fill the credentials form.
         # The password hash is never returned.
-        return {"ok": True, "auth_mode": config.get("auth_mode", "none"), "vscode_ssh_forwarding": config.get("vscode_ssh_forwarding", False), "username": config.get("username", "")}
+        return {"ok": True, "auth_mode": config.get("auth_mode", "none"),
+                # The saved choice and the live SELinux state can differ after
+                # an administrative policy rebuild.  Return both so the UI
+                # never presents an unavailable rule as working.
+                "vscode_ssh_forwarding_requested": config.get("vscode_ssh_forwarding", False),
+                "vscode_ssh_forwarding": vscode_policy_installed(),
+                "username": config.get("username", "")}
     if operation == "webui.rotate":
         return rotate_credentials(request.get("argument"))
     if operation == "webui.disable_auth":
@@ -139,6 +165,8 @@ def dispatch(request):
         return set_authentication_mode(request.get("argument"))
     if operation == "webui.set_vscode_forwarding":
         return set_vscode_forwarding(request.get("argument"))
+    if operation == "webui.repair_vscode_forwarding":
+        return repair_vscode_forwarding()
     if operation == "webui.pam_auth":
         return pam_authentication(request.get("argument"))
     argv = READ.get(operation) or WRITE.get(operation)

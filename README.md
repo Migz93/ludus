@@ -106,17 +106,18 @@ sudo systemctl restart plasmalogin
 
 ## Management WebUI
 
-The installer starts the authenticated management service on port `9876` and
+The installer starts the management service on port `9876` and
 opens it only to the directly connected private IPv4 subnet. It refuses to add
-a firewall opening when that subnet cannot be identified as private. It prints a one-time initial `admin` password. Open
+a firewall opening when that subnet cannot be identified as private. Open
 `http://<ludus-hostname-or-LAN-IP>:9876/` from a trusted home-network device.
 The WebUI can enrol/remove players, manage existing shared-library directories,
 run safe repair checks, and rotate its own credentials. Removing a player or
 library never deletes a Linux account, game files, or home data.
 
-The current service intentionally uses HTTP Basic authentication as its first
-transport boundary. Do not expose it to the Internet; session/rate-limit
-hardening remains to be completed.
+The WebUI has no credential by default and is restricted to loopback and the
+directly connected private LAN. Settings can require PAM authentication for
+`wheel` users, a local Ludus account, or both. Do not expose it to the
+Internet.
 
 ## Update behavior
 
@@ -141,7 +142,6 @@ login is unavailable, use SSH or a local TTY to run the command.
 
 - Steam readiness is detected through its Xwayland Big Picture window; Steam may change this in future.
 - The VM cannot validate final GPU, display, HDMI/VRR, or controller behavior.
-- On the current SELinux-enforcing test VM, the controller bridge is denied access to `/dev/uinput`; it now fails once rather than looping. A narrowly scoped device-access policy is still needed before controller remapping can be enabled and validated there.
 - Player switching from Steam is not supported.  A player must sign out before
   another Ludus user can sign in.
 

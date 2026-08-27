@@ -94,7 +94,14 @@ install -m 0644 "$project_dir/config/ludus-web.pam" /etc/pam.d/ludus-web
 checkmodule -M -m -o "$build_dir/ludus_vscode_ssh.mod" "$project_dir/selinux/ludus-vscode-ssh.te"
 semodule_package -o "$build_dir/ludus_vscode_ssh.pp" -m "$build_dir/ludus_vscode_ssh.mod"
 install -m 0644 "$build_dir/ludus_vscode_ssh.pp" "$install_root/ludus_vscode_ssh.pp"
-semodule -r ludus_vscode_ssh >/dev/null 2>&1 || true
+# Preserve the administrator's saved compatibility choice across a Ludus
+# reinstall.  Previously every install removed this policy even when the UI
+# still recorded it as enabled, leaving a misleading, broken setting.
+if [[ -r "$config_dir/webui.json" ]] && python3 -c 'import json, sys; sys.exit(not json.load(open(sys.argv[1])).get("vscode_ssh_forwarding", False))' "$config_dir/webui.json"; then
+  semodule -i "$install_root/ludus_vscode_ssh.pp"
+else
+  semodule -r ludus_vscode_ssh >/dev/null 2>&1 || true
+fi
 checkmodule -M -m -o "$build_dir/ludus_controller.mod" "$project_dir/selinux/ludus-controller.te"
 semodule_package -o "$build_dir/ludus_controller.pp" -m "$build_dir/ludus_controller.mod"
 install -m 0644 "$build_dir/ludus_controller.pp" "$install_root/ludus_controller.pp"

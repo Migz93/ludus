@@ -542,7 +542,7 @@ cmd_libraries() {
 }
 
 cmd_doctor() {
-    local result=0 user service library name target active_user='' mount_info source fstype expected actual zone records severity code subject data message
+    local result=0 user service library name target active_user='' mount_info source fstype expected resolved_source resolved_expected actual zone records severity code subject data message
     [[ "${1:-}" == --json ]] && doctor_json=true
     reconcile_active_session
     getent group "$group" >/dev/null && report HEALTHY group.present services "$group" '' "group $group exists" || { report ERROR group.missing services "$group" '' "group $group is missing"; result=1; }
@@ -590,7 +590,13 @@ cmd_doctor() {
                 source=$(findmnt -rn -o FSROOT -T "$target" 2>/dev/null || true)
                 if [[ -n "$active_user" ]] && valid_user "$active_user"; then
                     expected=$(private_dir "$active_user" "$library" "$name")
-                    [[ "$source" == "$expected" ]] && report HEALTHY bind.correct private "$target" "library=$library|source=$source" "private bind $target -> $source" || { report ERROR bind.wrong-target private "$target" "library=$library|source=$source|expected=$expected" "private bind $target points to $source; expected $expected"; result=1; }
+                    # Bazzite exposes /home/<user> as an alias of
+                    # /var/home/<user>.  findmnt can report either spelling,
+                    # so compare the resolved directories rather than issuing
+                    # a false isolation error for the same inode.
+                    resolved_source=$(readlink -f -- "$source" 2>/dev/null || printf '%s\n' "$source")
+                    resolved_expected=$(readlink -f -- "$expected" 2>/dev/null || printf '%s\n' "$expected")
+                    [[ "$resolved_source" == "$resolved_expected" ]] && report HEALTHY bind.correct private "$target" "library=$library|source=$source" "private bind $target -> $source" || { report ERROR bind.wrong-target private "$target" "library=$library|source=$source|expected=$expected" "private bind $target points to $source; expected $expected"; result=1; }
                 else
                     report WARNING bind.unclaimed private "$target" "library=$library|source=$source" "private bind $target is active ($source), but no valid active player is recorded"
                 fi

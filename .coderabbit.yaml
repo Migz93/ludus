@@ -1,0 +1,106 @@
+language: "en-US"
+tone_instructions: "Be direct and concise. Focus on correctness, security, and maintainability. Skip compliments and filler. Use plain language."
+
+reviews:
+  profile: "assertive"
+  high_level_summary: true
+  collapse_walkthrough: true
+  changed_files_summary: true
+  estimate_code_review_effort: true
+  assess_linked_issues: true
+  related_issues: true
+  related_prs: true
+  suggested_labels: true
+  auto_apply_labels: false
+  suggested_reviewers: false
+  poem: false
+  in_progress_fortune: false
+  sequence_diagrams: false
+  abort_on_close: true
+  commit_status: true
+
+  auto_review:
+    enabled: true
+    auto_incremental_review: true
+    drafts: false
+    base_branches:
+      - "main"
+    auto_pause_after_reviewed_commits: 0
+
+  path_instructions:
+    - path: "install.sh"
+      instructions: "This installer changes the login manager, PAM, systemd, SELinux, and firewall state. Flag non-idempotent changes, unsafe writes, unquoted shell expansions, missing rollback/backup behaviour, and Bazzite rpm-ostree assumptions."
+    - path: "uninstall.sh"
+      instructions: "Removal must restore Ludus-owned configuration without deleting accounts, player home data, game files, or unrelated system configuration. Flag broad deletion and incomplete recovery paths."
+    - path: "src/**"
+      instructions: "Ludus runs with elevated privileges around login, Steam libraries, mounts, and the WebUI. Focus on input validation, command injection, path traversal, unsafe ownership/mode changes, authentication/authorization, race conditions, and unhandled failures."
+    - path: "systemd/**"
+      instructions: "Review service isolation, ordering, restart semantics, writable paths, and least privilege."
+    - path: "selinux/**"
+      instructions: "Review policy rules for least privilege. Flag broad types, unnecessary permissions, and changes that weaken confinement."
+
+  pre_merge_checks:
+    title:
+      mode: "warning"
+      requirements: "PR title must start with a conventional commit type: feat:, fix:, chore:, docs:, refactor:, ci:"
+    description:
+      mode: "warning"
+    docstring_coverage:
+      mode: "disabled"
+
+  finishing_touches:
+    docstrings:
+      enabled: false
+    unit_tests:
+      enabled: true
+
+  tools:
+    markdownlint:
+      enabled: true
+    actionlint:
+      enabled: true
+    gitleaks:
+      enabled: true
+    shellcheck:
+      enabled: true
+    ruff:
+      enabled: true
+    eslint:
+      enabled: false
+    hadolint:
+      enabled: false
+    biome:
+      enabled: false
+    phpstan:
+      enabled: false
+    phpcs:
+      enabled: false
+    phpmd:
+      enabled: false
+    golangci-lint:
+      enabled: false
+    rubocop:
+      enabled: false
+    swiftlint:
+      enabled: false
+    detekt:
+      enabled: false
+    pmd:
+      enabled: false
+    flake8:
+      enabled: false
+    buf:
+      enabled: false
+    checkov:
+      enabled: false
+    tflint:
+      enabled: false
+
+knowledge_base:
+  opt_out: false
+  learnings:
+    scope: "local"
+  issues:
+    scope: "local"
+  pull_requests:
+    scope: "local"

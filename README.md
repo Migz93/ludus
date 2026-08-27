@@ -1,188 +1,169 @@
 # Ludus
 
-Ludus is an experimental, controller-first multi-user launcher for **Bazzite Desktop KDE**. It presents a console-style player selector, starts a separate Linux user session for the selected player, and hands off to Steam Big Picture only after it is ready.
+[![GitHub Activity][commits-shield]][commits]
+[![License][license-shield]][license]
+[![Project Maintainer][maintainer-shield]][user_profile]
+[![Buy me a coffee][buymecoffeebadge]][buymecoffee]
 
-Ludus is licensed under [GNU GPL v3.0 or later](LICENSE).
+Ludus turns **Bazzite Desktop KDE** into a controller-first, shared lounge
+gaming console.
 
-Ludus is a single-player console experience: only one Ludus user session may be
-active at a time.  A player must sign out before another player signs in; it
-does not support concurrent player sessions or in-session user switching.
+It replaces the normal login experience with a fullscreen player selector,
+starts a separate Linux user session for the selected player, and hands off to
+Steam Big Picture only after it is ready. Each player retains their own Steam
+account, saves, Proton prefixes, settings, and home directory.
 
-Shared Steam libraries are a Phase 2 feature in progress.  They share installed
-files, not Steam ownership: every player still needs the relevant entitlement
-on their own Steam account to launch a game.
+## What Ludus Does
 
-## Shared Steam libraries
+- Shows only enrolled local players in a controller-friendly fullscreen selector
+- Starts the selected player's normal Plasma Wayland session without exposing
+  the usual desktop startup sequence
+- Launches Steam Big Picture through Bazzite's supported Steam launcher
+- Supports shared Steam game libraries while keeping account and Proton data
+  private per player
+- Provides a LAN management WebUI for players, libraries, diagnostics, storage,
+  and optional Home Assistant MQTT integration
 
-Each player must retain Steam's mandatory library in their own home directory:
-`~/.local/share/Steam`. It contains the Steam client, account state, and other
-private data, so Ludus labels it **DO NOT USE** rather than removing it.
-
-Install games into a Ludus-managed shared library instead. Shared libraries use
-`root:ludus` ownership with group-write and setgid permissions, while their
-`steamapps/compatdata` and `steamapps/shadercache` paths are bind-mounted to
-the active player's private directories only for that player's session. Every
-parent directory of a shared library must also be traversable by all members of
-the `ludus` group; Ludus diagnostics check this.
-
-When creating a new shared library, Ludus creates Steam's
-`libraryfolder.vdf` marker with a unique positive numeric content ID, then
-registers the same path, ID, and optional label in every Steam-ready player's
-two `libraryfolders.vdf` files. Steam accepts this automatic setup; manually
-adding the path in Steam's Storage UI is not required. Library labels can be
-managed from the WebUI and are propagated to each Steam-ready player.
-
-Ludus records the administrator's preferred shared library in
-`/etc/ludus/default-library.conf`. Steam keeps the actual default install
-choice per player, so select that library in Steam's Storage UI for each
-Steam-ready player. Additional shared libraries remain available as alternate
-install locations.
-
-## Phase 1 status
-
-This project has been tested on the Bazzite KDE VM with Plasma Login Manager and Wayland. It uses normal Bazzite Desktop Plasma—not the Bazzite Deck/Gaming Mode image—and launches `/usr/bin/bazzite-steam steam://open/bigpicture` inside the selected user's normal Plasma Wayland session.
-
-Ludus builds a version-matched copy of Plasma Login's greeter in `/usr/local/lib/ludus`; vendor packages are not modified. The greeter uses Plasma Login's native authentication and session protocol, while a fallback wrapper starts the vendor greeter if an OS update makes the custom binary incompatible. This prevents an incompatible upgrade from leaving a blank login display.
-
-## Architecture
+## How It Works
 
 ```text
-boot -> plasmalogin -> Ludus player selector
-                         |  ludus.service: controller -> virtual keyboard
-                         v
-                    PAM / logind starts selected user
-                         v
-              Ludus Plasma Wayland session + loading cover
-                         v
-                     Steam Big Picture Mode
+boot -> Ludus player selector -> selected Linux user -> Steam Big Picture
 ```
 
-The loading cover stays above Plasma panels while Steam starts. It waits for Xwayland before launching Steam, then only clears after the Steam Big Picture window is detected.
-For a player who has never signed in to Steam on this machine, Ludus opens the
-normal Plasma desktop without starting Steam; they should open Steam normally,
-sign in once, then sign out and use Ludus normally thereafter.
+The selector uses Plasma Login's native authentication and session protocol.
+Ludus builds a version-matched copy of the Plasma Login greeter under
+`/usr/local/lib/ludus`; if a Bazzite update makes it incompatible, the wrapper
+falls back to the vendor greeter so the machine still has a usable graphical
+login.
 
-## Enrolled users
+The loading cover stays above Plasma panels while Steam starts. It waits for
+Xwayland and the Steam Big Picture window before handing over control. A player
+who has never signed in to Steam on the machine is sent to the normal Plasma
+desktop once to finish initial Steam setup.
 
-Only normal local login accounts enrolled in the `ludus` group are listed. This explicit membership also narrowly scopes passwordless login to the local Plasma Login greeter; it does not affect SSH, sudo, root, or other PAM services.
+## Key Features
+
+- Separate real Linux accounts for every player
+- Passwordless graphical login narrowly scoped to enrolled Ludus users
+- Xbox-style controller navigation, plus keyboard fallback
+- Single active player session, avoiding user-switching and shared-library races
+- Shared installed game files with private Steam account state, Proton prefixes,
+  shader cache, and saves
+- Safe library validation and repair through the WebUI or `ludusctl`
+- Management WebUI with PAM administrator authentication by default
+- Optional Home Assistant MQTT Discovery, player selection, status, and
+  lifecycle controls
+- SELinux-aware controller bridge and operational diagnostics
+
+## Quick Start
+
+### Requirements
+
+- Normal **Bazzite Desktop KDE** — not Bazzite Gaming Mode / Deck mode
+- Plasma Login Manager
+- The Bazzite-provided `/usr/bin/bazzite-steam` launcher
+- A local checkout of this repository
+- One or more normal Linux accounts to enrol as players
+
+### Install
+
+Run from the local checkout:
+
+```bash
+sudo ./install.sh
+```
+
+On a fresh Bazzite installation, the first run stages required build
+dependencies in one rpm-ostree deployment and offers to reboot. After booting
+the new deployment, run the same command again to complete installation.
+
+The installer creates the `ludus` group, installs the login/session services,
+builds the version-matched greeter, and retains a timestamped backup before
+changing active login configuration.
+
+### Enrol Players
+
+Only normal local login accounts in the `ludus` group appear in the selector.
+For example:
 
 ```bash
 sudo usermod -aG ludus miguel
 sudo usermod -aG ludus steph
 ```
 
-The player selector uses Plasma's real display name and avatar lookup. System accounts, non-login shells, and users outside the `ludus` group are excluded.
+Alternatively, use the WebUI after installation. Players must sign out and
+back in after their group membership changes.
 
-## Controller controls
+### Open The WebUI
 
-`ludus.service` creates a virtual keyboard only while the greeter runs. It maps D-pad/left stick to Left/Right and Xbox A (`BTN_SOUTH`) to Enter. Keyboard arrows and Enter are available as a fallback.
+The installer starts the management WebUI on port `9876`:
 
-Use `sudo journalctl -u ludus.service -b` to inspect controller detection. Physical-controller validation remains a Phase 1 hardware test item.
-
-## Installation
-
-Run from a local checkout:
-
-```bash
-cd ludus
-sudo ./install.sh
+```text
+http://<ludus-hostname-or-LAN-IP>:9876/
 ```
 
-On a fresh Bazzite installation, the first run stages every build dependency
-(including the optional MQTT client) in one rpm-ostree deployment and makes no
-login changes. It offers to reboot; after booting back in, run the same command
-again. The second run completes the installation and offers to restart Plasma
-Login, which activates Ludus without another full reboot. Non-interactive runs
-print the exact reboot or Plasma Login restart command instead.
+It defaults to local `wheel` administrator PAM authentication. The built-in
+server is HTTP-only, so access it only on a trusted wired LAN, authenticated
+VPN, or behind a TLS-terminating reverse proxy. Never expose it directly to the
+internet.
 
-The installer:
+## Shared Steam Libraries
 
-- builds against the currently installed `plasma-login-manager` version;
-- installs files under `/usr/local/lib/ludus`, `/etc/ludus`, and `/var/lib/ludus/backups/`;
-- creates the `ludus` group for enrolled users;
-- installs `ludus.service`, the `ludus.desktop` session, and `/etc/pam.d/plasmalogin-ludus`;
-- retains a timestamped backup before changing active login configuration.
+Ludus shares installed game files, not Steam ownership: every player still
+needs the relevant entitlement on their own Steam account.
 
-If you decline the final prompt, activate Ludus later with:
+Steam's mandatory library in `~/.local/share/Steam` remains private because it
+contains the Steam client, account state, and other player-specific data. Install
+games into Ludus-managed shared libraries instead. They use `root:ludus`
+ownership with group-write/setgid permissions, while `compatdata` and shader
+cache are privately bind-mounted for the active player only.
 
-```bash
-sudo systemctl restart plasmalogin
-```
-
-## Management WebUI
-
-The installer starts the management service on port `9876`. It only opens the
-firewall port in a `home`, `internal`, `trusted`, or Bazzite's default
-`FedoraWorkstation` firewalld zone; the WebUI itself also admits only loopback
-and directly connected private IPv4 subnets. If the active zone is not one of
-those supported zones, configure it before enabling LAN access. The built-in
-server is HTTP-only: HTTP Basic/PAM
-credentials are plaintext on the network. Use it only through a trusted wired
-LAN, an authenticated VPN, or a TLS-terminating reverse proxy—never ordinary
-Wi-Fi or an untrusted network. Open
-`http://<ludus-hostname-or-LAN-IP>:9876/` only when one of those protections
-is in place.
-The WebUI can enrol/remove players, manage existing shared-library directories,
-run safe repair checks, and rotate its own credentials. Removing a player or
-library never deletes a Linux account, game files, or home data.
-
-The WebUI defaults to PAM authentication for local `wheel` (administrator)
-members. Sign in with that administrator account's normal Linux password.
-The WebUI is restricted to loopback and the directly connected private LAN.
-Settings can instead select a local Ludus account or accept either method. Do
-not expose it to the Internet. Re-running the installer upgrades an older
-unauthenticated WebUI configuration to the PAM administrator default.
+Use the WebUI or `sudo ludusctl` to add, validate, repair, label, and select
+libraries. See [Shared Steam Libraries](docs/shared-libraries.md) for the full
+model and safety rules.
 
 ## Home Assistant MQTT
 
-The optional MQTT integration is configured from the WebUI's **MQTT** page.
-It uses Home Assistant MQTT Discovery to create a Ludus device with a player
-selector, session-active and active-player status, lifecycle/error sensors,
-and one-shot Sign out, Restart, and Shut down buttons. The selector includes
-`Inactive` plus the currently enrolled Ludus users.
+The optional MQTT integration is configured from the WebUI's **MQTT** page. It
+uses Home Assistant MQTT Discovery to expose player selection, session status,
+active-player status, lifecycle/error sensors, and one-shot sign-out, restart,
+and shutdown buttons.
 
-Selecting a player publishes a retained request, so it can be made before the
-PC is powered on. Once the machine reaches the Ludus greeter, it consumes the
-request, starts that selected user's normal Ludus session, and resets the
-selector to `Inactive`. Selecting `Inactive` before then clears the pending
-request. Requests expire after two minutes once handed to the greeter and are
-rejected whenever another Ludus session is active.
+Use a dedicated broker account with tightly scoped topic permissions. Anyone
+who can publish Ludus commands can start an enrolled account, sign out the
+active player, or power-cycle the PC. See [Home Assistant MQTT](docs/mqtt.md).
 
-Only player-selection messages may be retained. Sign out, restart, and shut
-down commands must be non-retained MQTT button messages with payload `PRESS`;
-Ludus rejects and clears retained lifecycle commands to prevent replay after a
-reconnect or reboot.
+## Important Limitations
 
-Use a dedicated broker account with narrowly scoped topic permissions. Anyone
-allowed to publish Ludus commands can start an enrolled account without its
-password, sign out the active player, or power-cycle the PC. Keep MQTT on your
-trusted network; use TLS where your broker supports it and access Home
-Assistant remotely through your usual VPN or other secured route.
+- Only one Ludus player session can be active at a time; players must sign out
+  before another player signs in.
+- Steam readiness is detected through its Xwayland Big Picture window, which may
+  need adjustment if Steam changes its behaviour.
+- Final GPU, HDMI/VRR, and physical-controller validation must happen on target
+  hardware.
+- The WebUI is not a public-facing service and does not provide built-in TLS.
 
-## Update behavior
+## Documentation
 
-Plasma Login uses Qt private APIs, so an OS update can require rebuilding Ludus. If the old custom greeter cannot load, the Ludus wrapper automatically falls back to Bazzite's stock Plasma Login greeter. Re-run `sudo ./install.sh` after booting the new deployment to rebuild Ludus for the updated Plasma version.
+Technical and operational documentation lives in [docs/](docs/README.md),
+including the [architecture](docs/architecture.md),
+[deployment](docs/deployment.md), [WebUI](docs/webui.md), and current
+[status](docs/status.md).
 
-## Removal and recovery
+## AI Transparency
 
-```bash
-sudo ./uninstall.sh
-sudo systemctl restart plasmalogin
-```
+Ludus was created with heavy AI assistance.
 
-The uninstaller removes Ludus configuration and restores normal Plasma Login. It
-also restores any Steam autostart entries that Ludus changed, removes its
-installer-created WebUI service account, and removes only the clearly marked
-`/etc/fstab` entries created when Ludus adopted a disk. It deliberately leaves
-the `ludus` group, user accounts, game data, Steam library registrations, and
-timestamped recovery backups in `/var/lib/ludus/backups/` intact. If graphical
-login is unavailable, use SSH or a local TTY to run the command.
+Claude, Codex, and CodeRabbit were used throughout the project for design
+exploration, implementation help, refactoring, review, explanation, and
+iteration. The intent is not to hide that. Ludus has been built by combining
+hands-on product direction with AI-assisted development work.
 
-## Current limitations
-
-- Steam readiness is detected through its Xwayland Big Picture window; Steam may change this in future.
-- The VM cannot validate final GPU, display, HDMI/VRR, or controller behavior.
-- Player switching from Steam is not supported.  A player must sign out before
-  another Ludus user can sign in.
-
-See [Phase1.md](Phase1.md) for the original Phase 1 brief.
+[buymecoffee]: https://www.buymeacoffee.com/Migz93
+[buymecoffeebadge]: https://img.shields.io/badge/buy%20me%20a%20coffee-donate-yellow.svg?style=for-the-badge
+[commits-shield]: https://img.shields.io/github/commit-activity/y/Migz93/ludus.svg?style=for-the-badge
+[commits]: https://github.com/Migz93/ludus/commits/main
+[license]: https://github.com/Migz93/ludus/blob/main/LICENSE
+[license-shield]: https://img.shields.io/github/license/Migz93/ludus.svg?style=for-the-badge
+[maintainer-shield]: https://img.shields.io/badge/maintainer-Migz93-blue.svg?style=for-the-badge
+[user_profile]: https://github.com/Migz93

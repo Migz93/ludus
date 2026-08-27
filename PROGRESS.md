@@ -186,8 +186,10 @@ step, CDN or external icon service.
 - The page response adds a Content-Security-Policy with a per-request script
   nonce, plus `Referrer-Policy: no-referrer`. Both are additive hardening.
 
-Validate the dashboard in an active-player state, and confirm that every
-doctor line is recognised rather than falling back to raw text.
+Validated in an active Miguel session: the WebUI showed zero review items for
+the expected private binds and running Steam process, displayed library free
+space, displayed the active player, and recognised every doctor line without
+falling back to raw text.
 
 ## Other remaining work
 

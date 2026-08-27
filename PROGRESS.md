@@ -102,11 +102,6 @@ Validated on the Bazzite VM:
   Steam with umask `0002` so future shared downloads and game files retain
   group-write access. Steph successfully wrote to the repaired directory.
 
-Still to validate later:
-
-- No further scheduled shared-library validation. Test game updates and
-  Bazzite-update recovery opportunistically when those events occur.
-
 ### Installer and removal lifecycle
 
 - The installer now declares all build and SELinux tooling it invokes, tracks

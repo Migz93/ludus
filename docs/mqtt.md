@@ -5,6 +5,7 @@
 The optional MQTT integration uses Home Assistant MQTT Discovery to expose a
 Ludus device with a player selector, active-session and active-player status,
 lifecycle/error sensors, and one-shot Sign out, Restart, and Shut down buttons.
+The discovered device is named `<hostname>-ludus`.
 
 Configure it from the WebUI's **MQTT** page. Keep the broker on a trusted
 network, use TLS when supported, and give Ludus a dedicated account restricted

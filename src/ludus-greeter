@@ -7,6 +7,33 @@ set -Eeuo pipefail
 custom=/usr/local/lib/ludus/plasma-login-greeter
 vendor=/usr/libexec/plasma-login-greeter
 
+has_enrolled_player() {
+    local user _ uid _ _ home shell uid_min=1000
+
+    if [[ -r /etc/login.defs ]]; then
+        uid_min=$(awk '/^[[:space:]]*UID_MIN[[:space:]]+[0-9]+/ { print $2; exit }' /etc/login.defs)
+        [[ "$uid_min" =~ ^[0-9]+$ ]] || uid_min=1000
+    fi
+
+    while IFS=: read -r user _ uid _ _ home shell; do
+        [[ "$uid" =~ ^[0-9]+$ ]] && (( uid >= uid_min )) || continue
+        [[ "$home" == /home/* || "$home" == /var/home/* ]] || continue
+        [[ "$shell" != */nologin && "$shell" != */false ]] || continue
+        if id -nG "$user" 2>/dev/null | tr ' ' '\n' | grep -Fxq ludus; then
+            return 0
+        fi
+    done < <(getent passwd)
+    return 1
+}
+
+# Keep the familiar vendor login screen until there is a real Ludus player to
+# select.  The custom greeter is still installed, so enrolling a player makes
+# it available immediately on the next Plasma Login start.
+if ! has_enrolled_player; then
+    echo "No Ludus players are enrolled; using the stock Plasma Login greeter." >&2
+    exec "$vendor" "$@"
+fi
+
 if [[ -x "$custom" ]] && ! /usr/bin/ldd -r "$custom" 2>&1 | grep -qE 'not found|undefined symbol'; then
     exec "$custom" "$@"
 fi

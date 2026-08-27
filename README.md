@@ -34,7 +34,8 @@ The selector uses Plasma Login's native authentication and session protocol.
 Ludus builds a version-matched copy of the Plasma Login greeter under
 `/usr/local/lib/ludus`; if a Bazzite update makes it incompatible, the wrapper
 falls back to the vendor greeter so the machine still has a usable graphical
-login.
+login. The vendor greeter also remains in use until a normal local player is
+enrolled in the `ludus` group.
 
 The loading cover stays above Plasma panels while Steam starts. It waits for
 Xwayland and the Steam Big Picture window before handing over control. A player

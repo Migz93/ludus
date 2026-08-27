@@ -84,6 +84,11 @@ def machine_id():
         return socket.gethostname()
 
 
+def device_name():
+    hostname = socket.gethostname().strip()
+    return f"{hostname or 'unknown-host'}-ludus"
+
+
 def atomic_json(path, value, mode=0o644):
     path.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as temp:
@@ -196,7 +201,7 @@ class LudusMqtt:
         return not active_user()
 
     def discovery(self):
-        device = {"identifiers": ["ludus_" + machine_id()], "name": "Ludus",
+        device = {"identifiers": ["ludus_" + machine_id()], "name": device_name(),
                   "manufacturer": "Ludus", "model": "Bazzite lounge console"}
         availability = {"topic": self.topic("state/availability"), "payload_available": "online",
                         "payload_not_available": "offline"}

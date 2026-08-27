@@ -5,6 +5,7 @@
 #include <fcntl.h>
 #include <linux/input.h>
 #include <linux/uinput.h>
+#include <limits.h>
 #include <poll.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -17,11 +18,12 @@
 static int devices[MAX_DEVS], ndev;
 
 static bool greeter_active(void) {
-    DIR *d = opendir("/proc"); struct dirent *e; char path[64], name[64]; FILE *f;
+    DIR *d = opendir("/proc"); struct dirent *e; char path[PATH_MAX], name[64]; FILE *f;
     if (!d) return false;
     while ((e = readdir(d))) {
         if (strspn(e->d_name, "0123456789") != strlen(e->d_name)) continue;
-        snprintf(path, sizeof path, "/proc/%s/comm", e->d_name);
+        int written = snprintf(path, sizeof path, "/proc/%s/comm", e->d_name);
+        if (written < 0 || (size_t)written >= sizeof path) continue;
         f = fopen(path, "r");
         if (f && fgets(name, sizeof name, f) && !strcmp(strtok(name, "\n"), "plasma-login-greeter")) { fclose(f); closedir(d); return true; }
         if (f) fclose(f);
@@ -46,13 +48,15 @@ static bool is_gamepad(int fd) {
     return (absbits[ABS_HAT0X / (8*sizeof(long))] & (1UL << (ABS_HAT0X % (8*sizeof(long))))) || (keybits[BTN_GAMEPAD / (8*sizeof(long))] & (1UL << (BTN_GAMEPAD % (8*sizeof(long)))));
 }
 static void scan(void) {
-    DIR *d = opendir("/dev/input"); struct dirent *e; char p[128]; int fd;
+    DIR *d = opendir("/dev/input"); struct dirent *e; char path[PATH_MAX]; int fd;
     for (int i = 0; i < ndev; ++i) close(devices[i]);
     ndev = 0;
     if (!d) return;
     while ((e = readdir(d)) && ndev < MAX_DEVS) {
         if (strncmp(e->d_name, "event", 5)) continue;
-        snprintf(p, sizeof p, "/dev/input/%s", e->d_name); fd = open(p, O_RDONLY | O_NONBLOCK);
+        int written = snprintf(path, sizeof path, "/dev/input/%s", e->d_name);
+        if (written < 0 || (size_t)written >= sizeof path) continue;
+        fd = open(path, O_RDONLY | O_NONBLOCK);
         if (fd >= 0 && is_gamepad(fd)) devices[ndev++] = fd; else if (fd >= 0) close(fd);
     }
     closedir(d);

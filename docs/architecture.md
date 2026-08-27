@@ -56,8 +56,9 @@ boot -> Plasma Login -> Ludus player selector
 ```
 
 The custom greeter uses Plasma Login's native authentication/session protocol.
-If an operating-system update leaves the version-matched custom greeter unable
-to start, `ludus-greeter` starts the vendor greeter instead so the system still
+Until at least one normal local account is enrolled in `ludus`, or if an
+operating-system update leaves the version-matched custom greeter unable to
+start, `ludus-greeter` starts the vendor greeter instead so the system still
 has a usable graphical login.
 
 The loading cover remains above Plasma panels while Steam starts. It waits for

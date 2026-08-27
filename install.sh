@@ -155,7 +155,7 @@ semodule -i "$install_root/ludus_controller.pp"
 # domains and permissions.
 semanage fcontext -a -t ludus_controller_exec_t "$install_root/ludus-controller-bridge" 2>/dev/null \
   || semanage fcontext -m -t ludus_controller_exec_t "$install_root/ludus-controller-bridge"
-restorecon -v "$install_root/ludus-controller-bridge"
+restorecon -Fv "$install_root/ludus-controller-bridge"
 install -m 0644 "$project_dir/systemd/plasma-login.service.d/ludus.conf" /etc/systemd/user/plasma-login.service.d/ludus.conf
 
 getent group ludus >/dev/null || groupadd --system ludus

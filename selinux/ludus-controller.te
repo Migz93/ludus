@@ -12,6 +12,7 @@ require {
     class file { entrypoint execute getattr map open read };
     class chr_file { getattr ioctl open read write };
     class process transition;
+    class process2 nnp_transition;
 }
 
 # The bridge is deliberately a separate domain.  It only reads physical input
@@ -26,6 +27,10 @@ role system_r types ludus_controller_t;
 
 allow init_t ludus_controller_exec_t:file { execute getattr map open read };
 allow init_t ludus_controller_t:process transition;
+# systemd's NoNewPrivileges setting requires an explicit policy exception for
+# this deliberately confined transition.  Do not permit execute_no_trans:
+# the bridge must never run in init_t instead of ludus_controller_t.
+allow init_t ludus_controller_t:process2 nnp_transition;
 type_transition init_t ludus_controller_exec_t:process ludus_controller_t;
 
 allow ludus_controller_t ludus_controller_exec_t:file { entrypoint execute getattr map open read };

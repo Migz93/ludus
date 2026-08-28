@@ -588,7 +588,7 @@ cmd_doctor() {
     getent group "$group" >/dev/null && report HEALTHY group.present services "$group" '' "group $group exists" || { report ERROR group.missing services "$group" '' "group $group is missing"; result=1; }
     [[ -x /usr/bin/bazzite-steam ]] && report HEALTHY steam-launcher.present services /usr/bin/bazzite-steam '' "Bazzite Steam launcher found" || { report ERROR steam-launcher.missing services /usr/bin/bazzite-steam '' "/usr/bin/bazzite-steam is missing"; result=1; }
     [[ -f "$libraries_file" ]] && report HEALTHY library-config.present services "$libraries_file" '' "library configuration found" || report WARNING library-config.absent services "$libraries_file" '' "no shared libraries configured"
-    for service in ludus.service ludus-mount.service ludus-backend.service ludus-web.service ludus-web-firewall.service ludus-mqtt.service; do
+    for service in ludus-mount.service ludus-backend.service ludus-web.service ludus-web-firewall.service ludus-mqtt.service; do
         if systemctl is-active --quiet "$service"; then
             report HEALTHY service.active services "$service" '' "$service is active"
         elif systemctl is-enabled --quiet "$service" 2>/dev/null; then
@@ -691,12 +691,6 @@ cmd_doctor() {
             Permissive) report WARNING selinux.permissive security '' '' "SELinux is permissive" ;;
             *) report WARNING selinux.disabled security '' '' "SELinux is disabled" ;;
         esac
-        if semodule -l 2>/dev/null | awk '$1 == "ludus_controller" { found=1 } END { exit !found }'; then
-            actual=$(ls -Zd /usr/local/lib/ludus/ludus-controller-bridge 2>/dev/null | awk '{print $1}')
-            [[ "$actual" == *:ludus_controller_exec_t:* ]] && report HEALTHY selinux.controller-ok security ludus_controller "label=$actual" "controller SELinux policy and executable label are installed" || { report ERROR selinux.controller-mislabelled security ludus_controller "label=${actual:-missing}" "controller executable SELinux label is ${actual:-missing}"; result=1; }
-        else
-            report ERROR selinux.controller-missing security ludus_controller '' "controller SELinux policy is not installed"; result=1
-        fi
         if [[ -r "$webui_config" ]] && python3 -c 'import json, sys; sys.exit(not json.load(open(sys.argv[1])).get("vscode_ssh_forwarding", False))' "$webui_config"; then
             if semodule -l 2>/dev/null | awk '$1 == "ludus_vscode_ssh" { found=1 } END { exit !found }'; then
                 report HEALTHY selinux.vscode-ok security ludus_vscode_ssh '' "VS Code Remote SSH forwarding policy is installed"
@@ -705,7 +699,7 @@ cmd_doctor() {
             fi
         fi
     else
-        report WARNING selinux.unavailable security '' '' "SELinux tools are unavailable; controller policy could not be checked"
+        report WARNING selinux.unavailable security '' '' "SELinux tools are unavailable; policy could not be checked"
     fi
     if "$doctor_json"; then emit_doctor_json; fi
     return "$result"

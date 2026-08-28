@@ -46,7 +46,7 @@ desktop once to finish initial Steam setup.
 
 - Separate real Linux accounts for every player
 - Passwordless graphical login narrowly scoped to enrolled Ludus users
-- Xbox-style controller navigation, plus keyboard fallback
+- Xbox-style controller navigation, with mouse support
 - Single active player session, avoiding user-switching and shared-library races
 - Shared installed game files with private Steam account state, Proton prefixes,
   shader cache, and saves
@@ -54,7 +54,7 @@ desktop once to finish initial Steam setup.
 - Management WebUI with PAM administrator authentication by default
 - Optional Home Assistant MQTT Discovery, player selection, status, and
   lifecycle controls
-- SELinux-aware controller bridge and operational diagnostics
+- Native KWin controller navigation, with mouse support
 
 ## Quick Start
 

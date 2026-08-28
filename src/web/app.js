@@ -408,7 +408,6 @@ const CHECK_GROUPS = [
 ];
 
 const SERVICES = {
-  'ludus.service': { name: 'Controller support', what: 'Lets a game controller navigate the sign-in screen and menus, standing in for a keyboard.' },
   'ludus-mount.service': { name: 'Private data service', what: 'Keeps each player’s Proton and shader files separate from other players.' },
   'ludus-backend.service': { name: 'Management service', what: 'Carries out the changes you make on this page.' },
   'ludus-web.service': { name: 'Control panel', what: 'Serves this page to your browser.' },
@@ -595,15 +594,6 @@ const CHECK_COPY = {
   'selinux.disabled': { g: 'security',
     t: () => 'SELinux protection is off',
     x: () => 'SELinux is switched off, so the extra confinement around Ludus components is not applied.' },
-  'selinux.controller-ok': { g: 'security',
-    t: () => 'Controller support is confined',
-    x: () => 'The gamepad helper is restricted to reading controllers and moving the on-screen selection, and nothing else.' },
-  'selinux.controller-mislabelled': { g: 'security',
-    t: () => 'Controller helper is mislabelled',
-    x: () => 'The gamepad helper does not carry its security label, so it may not be confined or may fail to read controllers. Reinstalling Ludus restores it.' },
-  'selinux.controller-missing': { g: 'security',
-    t: () => 'Controller security policy is missing',
-    x: () => 'The security rules for the gamepad helper are not loaded, so controller navigation at the login screen may not work.' },
   'selinux.vscode-ok': { g: 'security',
     t: () => 'VS Code forwarding is ready',
     x: () => 'The optional SELinux rule that VS Code Remote SSH needs is installed.' },
@@ -678,12 +668,9 @@ const LEGACY_RULES = [
   { re: /^SELinux is enforcing$/, code: 'selinux.enforcing' },
   { re: /^SELinux is permissive$/, code: 'selinux.permissive' },
   { re: /^SELinux is disabled$/, code: 'selinux.disabled' },
-  { re: /^controller SELinux policy and executable label are installed$/, code: 'selinux.controller-ok' },
-  { re: /^controller executable SELinux label is (.+)$/, code: 'selinux.controller-mislabelled', d: m => ({ label: m[1] }) },
-  { re: /^controller SELinux policy is not installed$/, code: 'selinux.controller-missing' },
   { re: /^VS Code Remote SSH forwarding policy is installed$/, code: 'selinux.vscode-ok' },
   { re: /^VS Code Remote SSH forwarding is enabled in Ludus, but its SELinux policy is not installed$/, code: 'selinux.vscode-missing' },
-  { re: /^SELinux tools are unavailable; controller policy could not be checked$/, code: 'selinux.unavailable' }
+  { re: /^SELinux tools are unavailable; policy could not be checked$/, code: 'selinux.unavailable' }
 ];
 
 /* Anything neither the code table nor the patterns recognise still has to land
@@ -763,7 +750,7 @@ function collectFacts(facts, record) {
   if (record.code === 'session.active') facts.activePlayer = record.subject;
   else if (record.code === 'library.mounted') facts.mounts.set(record.subject, { device: record.data.device || '', fstype: record.data.fstype || '' });
   else if (record.code === 'steam.running') facts.steamRunning.add(record.subject);
-  else if (record.code.startsWith('selinux.') && record.code !== 'selinux.unavailable' && !record.code.startsWith('selinux.controller')) {
+  else if (record.code.startsWith('selinux.') && record.code !== 'selinux.unavailable') {
     facts.selinux = record.code.slice('selinux.'.length);
   }
   if (BIND_STATE[record.code]) setBind(facts, record, BIND_STATE[record.code]);

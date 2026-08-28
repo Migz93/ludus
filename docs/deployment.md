@@ -16,6 +16,9 @@
 Ludus does not support Bazzite Deck/Gaming Mode or a separately installed Steam
 layout.
 
+The greeter uses KWin's `qt6-controllable` QML module for normalised gamepad
+input. The installer layers it when it is not already present.
+
 ## Installing It
 
 Run the installer from a local checkout:
@@ -50,7 +53,6 @@ systemd and must not be used for durable configuration.
 
 | Unit | Responsibility |
 |---|---|
-| `ludus.service` | Controller bridge while the greeter is active |
 | `ludus-mount.service` | Private Steam bind-mount daemon |
 | `ludus-backend.service` | Privileged WebUI backend socket |
 | `ludus-web.service` | HTTP WebUI frontend |

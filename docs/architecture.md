@@ -37,8 +37,9 @@ The installer builds a Plasma Login greeter matching the installed
 - `/var/lib/ludus/backups` — recovery backups made before changing login state
 - `/run/ludus` and `/run/ludus-mount` — runtime sockets and state
 
-Systemd services run the controller bridge, mount daemon, WebUI backend and
-frontend, firewall helper, and optional MQTT integration.
+Systemd services run the mount daemon, WebUI backend and frontend, firewall
+helper, and optional MQTT integration. Controller input is handled directly by
+Plasma Login's KWin compositor through its normalised gamepad QML API.
 
 ---
 
@@ -46,7 +47,7 @@ frontend, firewall helper, and optional MQTT integration.
 
 ```text
 boot -> Plasma Login -> Ludus player selector
-                            | controller bridge -> virtual keyboard
+                            | KWin gamepad API
                             v
                    PAM / logind starts selected user
                             v
@@ -74,8 +75,12 @@ their first Steam login; later Ludus sessions launch Big Picture normally.
 
 The custom Plasma Login greeter lists normal local login accounts enrolled in
 the `ludus` group. It uses the system display-name and avatar lookup, excludes
-system/non-login accounts, and supports keyboard plus common Xbox-style
-controller navigation through a virtual keyboard bridge.
+system/non-login accounts, and supports common gamepad navigation through
+KWin's normalised gamepad API: D-pad/left stick navigation and A/Cross or
+Start confirmation. Mouse interaction remains available. Shutdown and restart
+require a second activation of the selected greeter button before the request
+is sent; leaving that button cancels the pending confirmation. This keeps
+controller users out of a separate confirmation screen.
 
 ### Session launcher
 

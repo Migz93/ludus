@@ -70,7 +70,7 @@ fi
 # A deployment reboot is required before any login configuration is changed.
 # Complete upstream Plasma Login build closure on Fedora/Bazzite 44.
 # Keep this list together so a fresh install needs only one deployment reboot.
-needed=(git-core gcc checkpolicy policycoreutils-python-utils rpm-build cmake ninja-build pam-devel systemd-devel libXau-devel qt6-qtbase-devel qt6-qtdeclarative-devel qt6-qtshadertools-devel extra-cmake-modules kf6-kconfig-devel kf6-kcoreaddons-devel kf6-kpackage-devel kf6-kwindowsystem-devel kf6-ki18n-devel kf6-kdbusaddons-devel kf6-kcmutils-devel kf6-kauth-devel kf6-kio-devel libplasma-devel libkscreen-devel plasma-workspace-devel layer-shell-qt-devel python3-paho-mqtt)
+needed=(git-core gcc checkpolicy policycoreutils-python-utils rpm-build cmake ninja-build pam-devel systemd-devel libXau-devel qt6-qtbase-devel qt6-qtdeclarative-devel qt6-qtshadertools-devel qt6-controllable extra-cmake-modules kf6-kconfig-devel kf6-kcoreaddons-devel kf6-kpackage-devel kf6-kwindowsystem-devel kf6-ki18n-devel kf6-kdbusaddons-devel kf6-kcmutils-devel kf6-kauth-devel kf6-kio-devel libplasma-devel libkscreen-devel plasma-workspace-devel layer-shell-qt-devel python3-paho-mqtt)
 missing=()
 for package in "${needed[@]}"; do rpm -q "$package" &>/dev/null || missing+=("$package"); done
 if ((${#missing[@]})); then
@@ -99,7 +99,6 @@ cmake -S "$build_dir/source" -B "$build_dir/build" -GNinja -DCMAKE_BUILD_TYPE=Re
 ninja -C "$build_dir/build" plasma-login-greeter
 install -m 0755 "$build_dir/build/bin/plasma-login-greeter" "$install_root/plasma-login-greeter"
 install -m 0755 "$project_dir/src/ludus-greeter" "$install_root/ludus-greeter"
-cc -O2 -Wall -Wextra -o "$install_root/ludus-controller-bridge" "$project_dir/src/controller-bridge.c"
 cmake -S "$project_dir/src/splash" -B "$build_dir/splash" -GNinja -DCMAKE_BUILD_TYPE=Release
 ninja -C "$build_dir/splash"
 install -m 0755 "$build_dir/splash/ludus-splash" "$install_root/ludus-splash"
@@ -126,7 +125,6 @@ install -m 0644 "$project_dir/src/web/app.js" "$install_root/web/app.js"
 cc -O2 -Wall -Wextra -o "$install_root/ludus-pam-auth" "$project_dir/src/ludus-pam-auth.c" -lpam
 install -m 0755 "$project_dir/src/ludus-web-firewall" "$install_root/ludus-web-firewall"
 ln -sfn "$install_root/ludusctl" /usr/local/bin/ludusctl
-install -m 0644 "$project_dir/systemd/ludus.service" "$unit_dir/ludus.service"
 install -m 0644 "$project_dir/systemd/ludus-mount.service" "$unit_dir/ludus-mount.service"
 install -m 0644 "$project_dir/systemd/ludus-backend.service" "$unit_dir/ludus-backend.service"
 install -m 0644 "$project_dir/systemd/ludus-web.service" "$unit_dir/ludus-web.service"
@@ -146,16 +144,13 @@ if [[ -r "$config_dir/webui.json" ]] && python3 -c 'import json, sys; sys.exit(n
 else
   semodule -r ludus_vscode_ssh >/dev/null 2>&1 || true
 fi
-checkmodule -M -m -o "$build_dir/ludus_controller.mod" "$project_dir/selinux/ludus-controller.te"
-semodule_package -o "$build_dir/ludus_controller.pp" -m "$build_dir/ludus_controller.mod"
-install -m 0644 "$build_dir/ludus_controller.pp" "$install_root/ludus_controller.pp"
-semodule -i "$install_root/ludus_controller.pp"
-# Label only the bridge executable so systemd transitions this one service
-# into ludus_controller_t.  All other Ludus services retain their existing
-# domains and permissions.
-semanage fcontext -a -t ludus_controller_exec_t "$install_root/ludus-controller-bridge" 2>/dev/null \
-  || semanage fcontext -m -t ludus_controller_exec_t "$install_root/ludus-controller-bridge"
-restorecon -Fv "$install_root/ludus-controller-bridge"
+# Plasma Login's KWin compositor supplies normalised controller events directly
+# to Main.qml. Remove the old external-uinput bridge during upgrades so it
+# cannot duplicate navigation or activation events.
+systemctl disable --now ludus.service >/dev/null 2>&1 || true
+rm -f "$unit_dir/ludus.service" "$install_root/ludus-controller-bridge" "$install_root/ludus_controller.pp"
+semodule -r ludus_controller >/dev/null 2>&1 || true
+semanage fcontext -d "$install_root/ludus-controller-bridge" >/dev/null 2>&1 || true
 install -m 0644 "$project_dir/systemd/plasma-login.service.d/ludus.conf" /etc/systemd/user/plasma-login.service.d/ludus.conf
 
 getent group ludus >/dev/null || groupadd --system ludus
@@ -245,14 +240,13 @@ fi
 # restrictions while retaining a narrow, peer-credential-checked boundary.
 sed -i '\|ludus-steam-session-mount|d' /etc/pam.d/plasmalogin
 systemctl daemon-reload
-systemctl enable ludus.service
 systemctl enable --now ludus-mount.service
 systemctl enable --now ludus-backend.service ludus-web.service ludus-web-firewall.service
 systemctl enable --now ludus-mqtt.service
-# An upgrade replaces the Python entry points in place.  `enable --now` does
-# not restart an already-active unit, so explicitly reload the services that
-# keep those files in memory before declaring the deployment complete.  MQTT
-# is restarted first: unlike the backend it does not own /run/ludus, avoiding
+# An upgrade replaces entry points in place.  `enable --now` does not restart
+# an already-active unit, so explicitly restart the services that keep those
+# files in memory before declaring the deployment complete. MQTT is restarted
+# before the backend: unlike the backend it does not own /run/ludus, avoiding
 # removal of the backend's live Unix socket.
 systemctl restart ludus-mqtt.service
 systemctl restart ludus-backend.service ludus-web.service ludus-web-firewall.service

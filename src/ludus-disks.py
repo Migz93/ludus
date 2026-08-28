@@ -38,6 +38,12 @@ def mount(path, requested_target="/mnt/games"):
     os.makedirs(target, mode=0o755)
     try:
         subprocess.run(["mount", "-t", device["fstype"], "UUID=" + device["uuid"], target], check=True)
+        # Mounting an existing filesystem replaces the empty mount-point
+        # directory with that filesystem's own root permissions. Give Ludus
+        # players traversal only, so a private filesystem root cannot prevent
+        # a later shared library below it from being reached. This exposes
+        # neither directory listings nor file contents.
+        subprocess.run(["setfacl", "-m", "g:ludus:--x", target], check=True)
         line = f"UUID={device['uuid']} {target} {device['fstype']} defaults,nofail,x-systemd.device-timeout=10 0 2\n"
         with open("/etc/fstab", encoding="utf-8") as source: content = source.read()
         if "UUID=" + device["uuid"] not in content:

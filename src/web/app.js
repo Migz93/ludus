@@ -1525,7 +1525,7 @@ async function viewDisks() {
         el('span', { class: 'alert-icon' }, icon('shield')),
         el('div', { class: 'alert-body' },
           el('strong', { text: 'Nothing is formatted and nothing is erased' }),
-          el('p', { text: 'Ludus only attaches drives that already contain a supported Linux filesystem (ext4, XFS or Btrfs). Existing files are left untouched and stay exactly as they are.' })
+          el('p', { text: 'Ludus only attaches drives that already contain a supported Linux filesystem (ext4, XFS or Btrfs). Existing files are left untouched; Ludus grants players traversal-only access at the drive root so a shared game folder can be reached later.' })
         )
       ),
       el('div', { class: 'steps' },

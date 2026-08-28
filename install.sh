@@ -70,7 +70,7 @@ fi
 # A deployment reboot is required before any login configuration is changed.
 # Complete upstream Plasma Login build closure on Fedora/Bazzite 44.
 # Keep this list together so a fresh install needs only one deployment reboot.
-needed=(git-core gcc checkpolicy policycoreutils-python-utils rpm-build cmake ninja-build pam-devel systemd-devel libXau-devel qt6-qtbase-devel qt6-qtdeclarative-devel qt6-qtshadertools-devel qt6-controllable extra-cmake-modules kf6-kconfig-devel kf6-kcoreaddons-devel kf6-kpackage-devel kf6-kwindowsystem-devel kf6-ki18n-devel kf6-kdbusaddons-devel kf6-kcmutils-devel kf6-kauth-devel kf6-kio-devel libplasma-devel libkscreen-devel plasma-workspace-devel layer-shell-qt-devel python3-paho-mqtt)
+needed=(acl git-core gcc checkpolicy policycoreutils-python-utils rpm-build cmake ninja-build pam-devel systemd-devel libXau-devel qt6-qtbase-devel qt6-qtdeclarative-devel qt6-qtshadertools-devel qt6-controllable extra-cmake-modules kf6-kconfig-devel kf6-kcoreaddons-devel kf6-kpackage-devel kf6-kwindowsystem-devel kf6-ki18n-devel kf6-kdbusaddons-devel kf6-kcmutils-devel kf6-kauth-devel kf6-kio-devel libplasma-devel libkscreen-devel plasma-workspace-devel layer-shell-qt-devel python3-paho-mqtt)
 missing=()
 for package in "${needed[@]}"; do rpm -q "$package" &>/dev/null || missing+=("$package"); done
 if ((${#missing[@]})); then

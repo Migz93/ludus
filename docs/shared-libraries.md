@@ -41,7 +41,10 @@ player. Other configured libraries remain available as alternate locations.
 
 ## Safety Rules
 
-- All parent directories must be traversable by members of the `ludus` group
+- All parent directories must be traversable by members of the `ludus` group.
+  When a managed library is below a private directory on its own mounted data
+  filesystem, library add/repair grants the group traversal-only ACL access;
+  it does not expose directory listings or file contents.
 - Repair applies only to the Ludus-managed layout, never unrelated directories
 - Removing a library from Ludus does not delete game files
 - Removing a player does not delete their Linux account or home directory

@@ -396,6 +396,29 @@ prepare_library() {
     done
 }
 
+# A shared library may be deliberately placed below a private directory on an
+# otherwise valid mounted data filesystem.  Its own group mode cannot overcome
+# a missing execute bit on that ancestor.  Grant the Ludus group traversal
+# only, and only below the filesystem containing this managed library; do not
+# make the directory's contents readable or writable to other players.
+ensure_library_ancestor_access() {
+    local library=$1 mount current user blocked
+    mount=$(findmnt -rn -T "$library" -o TARGET) || die "cannot identify the filesystem containing $library"
+    current=$(dirname "$library")
+    while :; do
+        blocked=false
+        while IFS= read -r user; do
+            runuser -u "$user" -- test -x "$current" || { blocked=true; break; }
+        done < <(enrolled_users)
+        if "$blocked"; then
+            command -v setfacl >/dev/null || die "setfacl is required to grant Ludus users traversal of $current"
+            setfacl -m "g:$group:--x" "$current" || die "cannot grant Ludus users traversal of $current"
+        fi
+        [[ "$current" == "$mount" || "$current" == / ]] && break
+        current=$(dirname "$current")
+    done
+}
+
 check_library() {
     local library=$1 apps actual errors=0 name target user active_user=''
     apps="$library/steamapps"
@@ -440,6 +463,7 @@ check_library() {
 
 repair_library() {
     local library=$1 apps path
+    ensure_library_ancestor_access "$library"
     prepare_library "$library"
     apps="$library/steamapps"
     # Do not traverse other mounted filesystems or touch the private bind targets.
@@ -523,6 +547,7 @@ cmd_libraries() {
             require_root; [[ -n "$raw" ]] || die "usage: ludusctl libraries add <absolute-path>"
             assert_steam_stopped; ensure_config; ensure_group; library=$(safe_existing_library_path "$raw")
             while IFS= read -r path; do [[ "$path" == "$library" ]] && die "library is already configured: $library"; done < <(library_paths)
+            ensure_library_ancestor_access "$library"
             prepare_library "$library"
             printf '%s\n' "$library" >> "$libraries_file"
             while IFS= read -r user; do

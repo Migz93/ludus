@@ -1705,7 +1705,7 @@ function repairCard() {
       el('span', { class: 'alert-icon' }, icon('shield')),
       el('div', { class: 'alert-body' },
         el('strong', { text: 'What repair does, and what it will not do' }),
-        el('p', { text: 'Repair re-creates missing shared folders, restores group ownership and permissions across each shared library, and reseals every player’s private Proton and shader folders.' })
+        el('p', { text: 'Repair re-creates missing shared folders, restores group ownership and permissions across each shared library, grants any required traversal-only access through its parent folders, and reseals every player’s private Proton and shader folders.' })
       )
     ),
     assurances(
@@ -1728,7 +1728,7 @@ async function confirmRepair(button) {
       assurances(
         'No games, saves or home data are deleted.',
         'It stops immediately if a player has Steam open.',
-        'Only the shared libraries Ludus already manages are touched.'
+        'Only managed shared libraries and their required parent-folder traversal permissions are touched.'
       ),
       el('p', { text: 'On a large library this can take a little while.' })
     )

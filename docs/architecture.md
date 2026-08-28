@@ -63,8 +63,10 @@ start, `ludus-greeter` starts the vendor greeter instead so the system still
 has a usable graphical login.
 
 The loading cover remains above Plasma panels while Steam starts. It waits for
-Xwayland and then for the Steam Big Picture window. A player who has not signed
-in to Steam on the machine is sent to the normal Plasma desktop to complete
+Xwayland and then for the Steam Big Picture window, releases its exclusive
+input surface, and keeps that specific Xwayland window active through Steam's
+first minute of startup. A player who has not signed in to Steam on the
+machine is sent to the normal Plasma desktop to complete
 their first Steam login; later Ludus sessions launch Big Picture normally.
 
 ---

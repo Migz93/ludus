@@ -5,7 +5,21 @@
 set -Eeuo pipefail
 
 ready_file="$XDG_RUNTIME_DIR/ludus-steam-ready"
-[[ -e "$ready_file" ]] && unlink "$ready_file"
+splash_dismissed_file="$XDG_RUNTIME_DIR/ludus-splash-dismissed"
+for file in "$ready_file" "$splash_dismissed_file"; do
+    [[ -e "$file" ]] && unlink "$file"
+done
+
+big_picture_window_id() {
+    /usr/bin/wmctrl -lx 2>/dev/null | awk 'BEGIN { IGNORECASE=1 } /steam.*(big picture|gamepadui)/ { print $1; exit }' || true
+}
+
+activate_big_picture() {
+    local window_id
+    window_id=$(big_picture_window_id)
+    [[ -n "$window_id" ]] || return 1
+    /usr/bin/wmctrl -i -a "$window_id" >/dev/null 2>&1
+}
 
 # The dedicated Ludus session deliberately leaves first-time Steam users at
 # their desktop.  Keep this defensive guard as well, so an accidental direct
@@ -35,10 +49,34 @@ for _ in $(seq 1 300); do
             # The splash does not have Xwayland's per-session credentials, so
             # it cannot run wmctrl itself. Signal it only after the actual
             # Big Picture/Gamepad UI window—not an early generic web helper—
-            # has appeared.
+            # has appeared.  It then closes and releases its exclusive input
+            # surface before this process activates the Steam window.
             for _ in $(seq 1 450); do
-                if /usr/bin/wmctrl -lx 2>/dev/null | grep -qiE 'steam.*(big picture|gamepadui)'; then
+                window_id=$(big_picture_window_id)
+                if [[ -n "$window_id" ]]; then
                     : > "$ready_file"
+                    # KWin can leave the panel visible if the Xwayland Big
+                    # Picture window is created behind the cover but never
+                    # receives focus.  Wait for the cover to close first,
+                    # then explicitly make that exact window active.
+                    for _ in $(seq 1 100); do
+                        [[ -e "$splash_dismissed_file" ]] && break
+                        sleep 0.1
+                    done
+                    if [[ -e "$splash_dismissed_file" ]]; then
+                        sleep 0.1
+                        activate_big_picture || true
+                        # Steam can replace its introductory Xwayland window
+                        # with the final Gamepad UI after the first focus
+                        # request. Xwayland Video Bridge can also take focus
+                        # several seconds later. Re-discover the window for a
+                        # short handoff period rather than retaining a stale
+                        # ID or assuming one delayed retry is sufficient.
+                        for _ in $(seq 1 120); do
+                            sleep 0.5
+                            activate_big_picture || true
+                        done
+                    fi
                     break
                 fi
                 sleep 0.2

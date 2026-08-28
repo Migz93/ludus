@@ -38,7 +38,9 @@ login. The vendor greeter also remains in use until a normal local player is
 enrolled in the `ludus` group.
 
 The loading cover stays above Plasma panels while Steam starts. It waits for
-Xwayland and the Steam Big Picture window before handing over control. A player
+Xwayland and the Steam Big Picture window, then releases its input surface and
+keeps that Steam window active through its first minute of startup before
+handing over control. A player
 who has never signed in to Steam on the machine is sent to the normal Plasma
 desktop once to finish initial Steam setup.
 

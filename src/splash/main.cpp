@@ -36,6 +36,18 @@ static QString displayName()
     return name.isEmpty() ? QString::fromLocal8Bit(account->pw_name) : name;
 }
 
+static void markSplashDismissed()
+{
+    const QString runtimeDir = QString::fromUtf8(qgetenv("XDG_RUNTIME_DIR"));
+    if (runtimeDir.isEmpty()) {
+        return;
+    }
+    QFile dismissed(runtimeDir + QStringLiteral("/ludus-splash-dismissed"));
+    if (dismissed.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        dismissed.close();
+    }
+}
+
 int main(int argc, char **argv)
 {
     QGuiApplication app(argc, argv);
@@ -73,7 +85,13 @@ int main(int argc, char **argv)
     QObject::connect(timer, &QTimer::timeout, &app, [&] {
         if (bigPictureVisible()) {
             if (*stableSince == 0) *stableSince = elapsed->elapsed();
-            if (elapsed->elapsed() - *stableSince >= 1500) app.quit();
+            if (elapsed->elapsed() - *stableSince >= 1500) {
+                // Release the layer-shell surface before ludus-steam asks
+                // KWin to activate the Xwayland Big Picture window.
+                view.close();
+                markSplashDismissed();
+                app.quit();
+            }
         } else {
             *stableSince = 0;
         }

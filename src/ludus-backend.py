@@ -19,6 +19,7 @@ MQTT_CONFIG = "/etc/ludus/mqtt.json"
 MQTT_STATUS = "/run/ludus/mqtt-status.json"
 MQTT_HELPER = "/usr/local/lib/ludus/ludus-mqtt"
 VSCODE_POLICY = "/usr/local/lib/ludus/ludus_vscode_ssh.pp"
+GREETER_DISPLAY_CONFIG = "/etc/ludus/greeter-display.json"
 READ = {
     "status": ["status"], "doctor": ["doctor"],
     # Read-only structured reporting for the WebUI. Neither command changes
@@ -156,6 +157,39 @@ def repair_vscode_forwarding():
         raise RuntimeError("the VS Code SELinux policy could not be confirmed after repair")
     return {"ok": True, "output": "VS Code Remote SSH forwarding policy restored."}
 
+
+def greeter_display_settings():
+    try:
+        with open(GREETER_DISPLAY_CONFIG, encoding="utf-8") as source:
+            config = json.load(source)
+    except (OSError, ValueError):
+        config = {}
+    return {"ok": True, "configured": bool(config), "width": config.get("width"),
+            "height": config.get("height"), "refresh": config.get("refresh"),
+            "scale": config.get("scale")}
+
+
+def save_greeter_display_settings(argument):
+    if not isinstance(argument, dict):
+        raise RuntimeError("invalid login display configuration")
+    width, height, refresh, scale = (argument.get(key) for key in ("width", "height", "refresh", "scale"))
+    if (not isinstance(width, int) or not isinstance(height, int)
+            or not isinstance(refresh, (int, float)) or isinstance(refresh, bool)
+            or not isinstance(scale, (int, float)) or isinstance(scale, bool)):
+        raise RuntimeError("resolution, refresh rate and scale are required")
+    if not (640 <= width <= 8192 and 480 <= height <= 8192):
+        raise RuntimeError("invalid login resolution")
+    if not 23 <= refresh <= 360:
+        raise RuntimeError("refresh rate must be between 23 and 360 Hz")
+    if scale not in {1, 1.25, 1.5, 1.75, 2}:
+        raise RuntimeError("invalid login display scale")
+    config = {"width": width, "height": height, "refresh": refresh, "scale": scale}
+    temporary = GREETER_DISPLAY_CONFIG + ".new"
+    with open(temporary, "w", encoding="utf-8") as target:
+        json.dump(config, target, separators=(",", ":")); target.write("\n")
+    os.chown(temporary, 0, 0); os.chmod(temporary, 0o644); os.replace(temporary, GREETER_DISPLAY_CONFIG)
+    return {"ok": True, "output": "Login screen display settings saved. They apply the next time Plasma Login starts."}
+
 def pam_authentication(argument):
     if not isinstance(argument, dict): raise RuntimeError("invalid PAM credentials")
     username, password = argument.get("username"), argument.get("password")
@@ -239,6 +273,8 @@ def dispatch(request):
                 "vscode_ssh_forwarding": vscode_policy_installed(),
                 "username": config.get("username", "")}
     if operation == "mqtt.settings": return mqtt_settings()
+    if operation == "greeter.display.settings": return greeter_display_settings()
+    if operation == "greeter.display.save": return save_greeter_display_settings(request.get("argument"))
     if operation == "mqtt.save": return save_mqtt_settings(request.get("argument"))
     if operation == "mqtt.test": return test_mqtt()
     if operation == "webui.rotate":

@@ -33,6 +33,8 @@ an HTTP endpoint that directly shells out or bypasses the backend's validation.
   the player group traversal-only access at the filesystem root so a later
   shared library remains reachable without exposing file contents
 - rotate WebUI credentials and configure permitted authentication modes
+- choose the resolution, refresh rate, and UI scale used by the next Plasma
+  Login greeter session
 - configure and test the optional Home Assistant MQTT integration
 
 ## Operational Checks

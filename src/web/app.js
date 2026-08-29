@@ -371,6 +371,14 @@ const load = {
       username: String(result.username || '')
     };
   }),
+  greeterDisplay: () => cached('greeter-display', async () => {
+    const result = requireOk(await api('/api/greeter-display'), 'The login screen display settings could not be read.');
+    return {
+      configured: Boolean(result.configured), width: Number(result.width || 1920),
+      height: Number(result.height || 1080), refresh: Number(result.refresh || 60),
+      scale: Number(result.scale || 1)
+    };
+  }),
   mqtt: () => cached('mqtt', async () => {
     const result = requireOk(await api('/api/mqtt'), 'The MQTT settings could not be read.');
     return {
@@ -1767,11 +1775,12 @@ function modeFor(requireSignIn, allowPam, allowLocal) {
 }
 
 async function viewSettings() {
-  const [settings, doctor] = await Promise.all([load.settings(), load.doctor()]);
+  const [settings, display, doctor] = await Promise.all([load.settings(), load.greeterDisplay(), load.doctor()]);
   const networkChecks = doctor.checks.filter(check => check.group === 'network');
 
   return frag(
     authCard(settings),
+    greeterDisplayCard(display),
     compatibilityCard(settings),
     card(
       cardHead('How this page is reached',
@@ -1785,6 +1794,50 @@ async function viewSettings() {
         ? disclosure('Technical details', el('pre', { class: 'raw', text: networkChecks.map(check => check.detail).join('\n') }), 'card-disclosure')
         : null
     )
+  );
+}
+
+function selectControl(id, choices, selected) {
+  return el('select', { id }, choices.map(([value, label]) =>
+    el('option', { value, selected: String(value) === String(selected) ? true : null, text: label })));
+}
+
+function greeterDisplayCard(display) {
+  const resolutions = [
+    ['1280x720', '1280 × 720 (720p)'], ['1920x1080', '1920 × 1080 (1080p)'],
+    ['2560x1440', '2560 × 1440 (1440p)'], ['3840x2160', '3840 × 2160 (4K)'],
+    ['4096x2160', '4096 × 2160 (DCI 4K)']
+  ];
+  const refreshes = [[24, '24 Hz'], [30, '30 Hz'], [50, '50 Hz'], [60, '60 Hz'],
+    [100, '100 Hz'], [120, '120 Hz'], [144, '144 Hz']];
+  const scales = [[1, '100%'], [1.25, '125%'], [1.5, '150%'], [1.75, '175%'], [2, '200%']];
+  const resolution = selectControl('greeter-resolution', resolutions, `${display.width}x${display.height}`);
+  const refresh = selectControl('greeter-refresh', refreshes, display.refresh);
+  const scale = selectControl('greeter-scale', scales, display.scale);
+  const save = el('button', { class: 'btn btn-primary', type: 'submit' }, el('span', { text: 'Save login display settings' }));
+
+  return card(
+    cardHead('Login screen display', 'The player selector runs before any player desktop starts, so it has its own resolution and scale.'),
+    el('form', {
+      onSubmit: event => {
+        event.preventDefault();
+        const [width, height] = resolution.value.split('x').map(Number);
+        confirmGreeterDisplay({ width, height, refresh: Number(refresh.value), scale: Number(scale.value) }, save);
+      }
+    },
+      el('div', { class: 'form-row form-row-top' },
+        el('div', { class: 'field' }, el('label', { for: 'greeter-resolution', text: 'Resolution' }), resolution),
+        el('div', { class: 'field' }, el('label', { for: 'greeter-refresh', text: 'Refresh rate' }), refresh),
+        el('div', { class: 'field' }, el('label', { for: 'greeter-scale', text: 'UI scale' }), scale)
+      ),
+      el('p', { class: 'stat-note', text: display.configured
+        ? 'A Ludus override is saved. It will replace the display default when the next login screen starts.'
+        : 'No override is saved yet; Plasma Login currently uses the display’s preferred mode.' }),
+      el('div', { class: 'actions actions-top' }, save)
+    ),
+    disclosure('Important details',
+      el('p', { text: 'The change takes effect the next time you sign out or restart Plasma Login. Ludus applies it only to outputs that support the selected mode; an unsupported output stays on its safe default.' }),
+      'card-disclosure')
   );
 }
 
@@ -2044,6 +2097,27 @@ async function confirmVscode(enabled, toggle) {
     busyLabel: 'Applying…',
     success: enabled ? 'VS Code compatibility turned on' : 'VS Code compatibility turned off',
     failure: 'That compatibility setting could not be changed'
+  });
+}
+
+async function confirmGreeterDisplay(display, button) {
+  const confirmed = await ask({
+    title: 'Save login screen display settings?', icon: 'settings', tone: 'accent', confirmLabel: 'Save settings',
+    body: frag(
+      el('p', { text: `The player selector will use ${display.width} × ${display.height} at ${display.refresh} Hz with ${display.scale * 100}% UI scale when Plasma Login next starts.` }),
+      assurances(
+        'Your normal desktop display settings are not changed.',
+        'The change applies after you sign out or restart Plasma Login.',
+        'If an output does not support this mode, it remains at its safe default.'
+      )
+    )
+  });
+  if (!confirmed) return;
+  await mutate(button, {
+    path: '/api/greeter-display', body: display, busyLabel: 'Saving…',
+    success: 'Login screen display settings saved',
+    detail: 'They will apply the next time Plasma Login starts.',
+    failure: 'The login screen display settings could not be saved'
   });
 }
 

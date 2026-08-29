@@ -36,12 +36,17 @@ The installer builds the custom greeter against the currently installed
 `plasma-login-manager` version. It retains a timestamped backup before changing
 the active login configuration.
 
+Plasma Login runs in its own Wayland/KWin session and does not inherit a
+player's desktop resolution or scale. The WebUI can save a Ludus-owned login
+display mode and scale. It is applied to each enabled output when Plasma Login
+next starts; unsupported modes are safely left at the output default.
+
 ## Persistent Data
 
 | Path | Purpose |
 |---|---|
 | `/usr/local/lib/ludus` | Ludus executables, greeter, UI files, and policy artefacts |
-| `/etc/ludus` | Configuration, WebUI settings, MQTT settings, library records, and install markers |
+| `/etc/ludus` | Configuration, WebUI settings, login-display settings, MQTT settings, library records, and install markers |
 | `/var/lib/ludus/backups` | Pre-change login and Steam-autostart backups |
 | `/run/ludus` | WebUI backend socket, MQTT status, and transient requests |
 | `/run/ludus-mount` | Mount control socket and active-session marker |

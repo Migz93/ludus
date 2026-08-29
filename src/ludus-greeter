@@ -6,6 +6,7 @@ set -Eeuo pipefail
 
 custom=/usr/local/lib/ludus/plasma-login-greeter
 vendor=/usr/libexec/plasma-login-greeter
+display_helper=/usr/local/lib/ludus/ludus-greeter-display
 
 has_enrolled_player() {
     local user _ uid _ _ home shell uid_min=1000
@@ -35,6 +36,10 @@ if ! has_enrolled_player; then
 fi
 
 if [[ -x "$custom" ]] && ! /usr/bin/ldd -r "$custom" 2>&1 | grep -qE 'not found|undefined symbol'; then
+    # Plasma Login has its own KWin session and therefore does not inherit a
+    # player's desktop mode or scale.  Apply Ludus' optional, validated
+    # override before the greeter creates a window for each output.
+    [[ ! -x "$display_helper" ]] || "$display_helper"
     exec "$custom" "$@"
 fi
 

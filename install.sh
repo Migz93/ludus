@@ -99,6 +99,7 @@ cmake -S "$build_dir/source" -B "$build_dir/build" -GNinja -DCMAKE_BUILD_TYPE=Re
 ninja -C "$build_dir/build" plasma-login-greeter
 install -m 0755 "$build_dir/build/bin/plasma-login-greeter" "$install_root/plasma-login-greeter"
 install -m 0755 "$project_dir/src/ludus-greeter" "$install_root/ludus-greeter"
+install -m 0755 "$project_dir/src/ludus-greeter-display.py" "$install_root/ludus-greeter-display"
 cmake -S "$project_dir/src/splash" -B "$build_dir/splash" -GNinja -DCMAKE_BUILD_TYPE=Release
 ninja -C "$build_dir/splash"
 install -m 0755 "$build_dir/splash/ludus-splash" "$install_root/ludus-splash"

@@ -6,12 +6,15 @@ set -Eeuo pipefail
 # outside this dedicated Ludus session is unaffected.
 systemctl --user mask --runtime plasma-ksplash.service >/dev/null 2>&1 || true
 
-# A first-time Steam user must sign in through the normal desktop client before
-# Steam creates loginusers.vdf.  Do not hide their desktop behind a Big Picture
-# launch that cannot yet complete; they can open Steam normally and sign in.
+# A first-time Steam user needs the normal client to create loginusers.vdf.
+# Start it automatically after Plasma/Xwayland is ready, but leave the desktop
+# available for its account setup. Later sessions use the Ludus cover and Big
+# Picture path below.
 if [[ -s "$HOME/.local/share/Steam/config/loginusers.vdf" ]]; then
     # The overlay waits for its Wayland socket, covers startup, and launches
     # Steam Big Picture once it can connect.
     /usr/local/lib/ludus/ludus-overlay &
+else
+    /usr/local/lib/ludus/ludus-steam --first-run &
 fi
 exec /usr/libexec/plasma-dbus-run-session-if-needed /usr/bin/startplasma-wayland

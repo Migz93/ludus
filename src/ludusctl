@@ -100,6 +100,34 @@ disable_steam_autostart() {
     chmod 0644 "$autostart_file"
 }
 
+disable_automatic_screen_lock() {
+    # A Ludus player session is controller-first and can spend longer than
+    # Plasma's short desktop default in a game or launcher. Keep the setting
+    # per user, rather than weakening the system-wide screen-lock policy.
+    local user=$1 home_dir
+    home_dir=$(getent passwd "$user" | cut -d: -f6)
+    [[ -n "$home_dir" && -d "$home_dir" ]] || die "cannot find a home directory for $user"
+    install -d -o "$user" -g "$(id -gn "$user")" -m 0755 "$home_dir/.config"
+    runuser -u "$user" -- kwriteconfig6 --file "$home_dir/.config/kscreenlockerrc" --group Daemon --key Autolock --type bool false
+    runuser -u "$user" -- kwriteconfig6 --file "$home_dir/.config/kscreenlockerrc" --group Daemon --key Timeout 0
+}
+
+disable_automatic_power_management() {
+    # Match the lounge PC's always-on, controller-first use: PowerDevil must
+    # not dim the display, blank it, or suspend an enrolled player's session.
+    # These are deliberately per-user AC-profile settings, not system policy.
+    local user=$1 home_dir powerdevil_file
+    home_dir=$(getent passwd "$user" | cut -d: -f6)
+    [[ -n "$home_dir" && -d "$home_dir" ]] || die "cannot find a home directory for $user"
+    install -d -o "$user" -g "$(id -gn "$user")" -m 0755 "$home_dir/.config"
+    powerdevil_file="$home_dir/.config/powerdevilrc"
+    runuser -u "$user" -- kwriteconfig6 --file "$powerdevil_file" --group AC --group Display --key DimDisplayWhenIdle --type bool false
+    runuser -u "$user" -- kwriteconfig6 --file "$powerdevil_file" --group AC --group Display --key DimDisplayIdleTimeoutSec -- -1
+    runuser -u "$user" -- kwriteconfig6 --file "$powerdevil_file" --group AC --group Display --key TurnOffDisplayWhenIdle --type bool false
+    runuser -u "$user" -- kwriteconfig6 --file "$powerdevil_file" --group AC --group Display --key TurnOffDisplayIdleTimeoutSec -- -1
+    runuser -u "$user" -- kwriteconfig6 --file "$powerdevil_file" --group AC --group SuspendAndShutdown --key AutoSuspendAction 0
+}
+
 restore_steam_autostart() {
     local user=$1 home_dir autostart_file state backups preserved temporary
     home_dir=$(getent passwd "$user" | cut -d: -f6)
@@ -517,6 +545,8 @@ cmd_users() {
             assert_steam_stopped; ensure_config; ensure_group
             usermod -aG "$group" "$user"
             disable_steam_autostart "$user"
+            disable_automatic_screen_lock "$user"
+            disable_automatic_power_management "$user"
             if steam_initialized_for "$user"; then
                 while IFS= read -r library; do prepare_user_private_dirs "$user" "$library"; done < <(library_paths)
             else

@@ -40,9 +40,9 @@ enrolled in the `ludus` group.
 The loading cover stays above Plasma panels while Steam starts. It waits for
 Xwayland and the Steam Big Picture window, then releases its input surface and
 keeps that Steam window active through its first minute of startup before
-handing over control. A player
-who has never signed in to Steam on the machine is sent to the normal Plasma
-desktop once to finish initial Steam setup.
+handing over control. A player who has never signed in to Steam on the machine
+is taken to the normal Plasma desktop with the standard Steam client opened
+automatically to finish initial setup.
 
 ## Key Features
 

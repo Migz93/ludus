@@ -6,6 +6,10 @@ set -Eeuo pipefail
 
 ready_file="$XDG_RUNTIME_DIR/ludus-steam-ready"
 splash_dismissed_file="$XDG_RUNTIME_DIR/ludus-splash-dismissed"
+first_run=false
+if [[ ${1:-} == --first-run ]]; then
+    first_run=true
+fi
 for file in "$ready_file" "$splash_dismissed_file"; do
     [[ -e "$file" ]] && unlink "$file"
 done
@@ -21,10 +25,12 @@ activate_big_picture() {
     /usr/bin/wmctrl -i -a "$window_id" >/dev/null 2>&1
 }
 
-# The dedicated Ludus session deliberately leaves first-time Steam users at
-# their desktop.  Keep this defensive guard as well, so an accidental direct
-# invocation cannot open Big Picture before that user has signed in normally.
-[[ -s "$HOME/.local/share/Steam/config/loginusers.vdf" ]] || exit 0
+# Do not accidentally launch Big Picture for an account that has never signed
+# into Steam. The dedicated first-run invocation below deliberately opens the
+# normal client instead, on the visible Plasma desktop.
+if ! "$first_run" && [[ ! -s "$HOME/.local/share/Steam/config/loginusers.vdf" ]]; then
+    exit 0
+fi
 
 for _ in $(seq 1 300); do
     while read -r pid; do
@@ -34,6 +40,14 @@ for _ in $(seq 1 300); do
         [[ -n "$display" && -n "$authority" && -r "$authority" ]] || continue
         if DISPLAY="$display" XAUTHORITY="$authority" /usr/bin/xdpyinfo >/dev/null 2>&1; then
             export DISPLAY="$display" XAUTHORITY="$authority"
+            if "$first_run"; then
+                # Bazzite owns the first-run bootstrap and account-login flow.
+                # Do not mount or register shared libraries until Steam has
+                # created the player's private account state.
+                /usr/bin/bazzite-steam &
+                wait "$!"
+                exit $?
+            fi
             /usr/local/lib/ludus/ludus-mountctl mount
             trap '/usr/local/lib/ludus/ludus-mountctl unmount || true' EXIT
             # Register shared libraries while Steam is stopped.  The helper is

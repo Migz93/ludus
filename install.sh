@@ -227,6 +227,19 @@ while IFS=: read -r user _ _ _ _ home_dir _; do
   printf '%s\n' '[Desktop Entry]' 'Hidden=true' > "$autostart_file"
   chown "$user:$(id -gn "$user")" "$autostart_file"
   chmod 0644 "$autostart_file"
+  # Ludus is controller-first, so prevent Plasma's short per-user desktop
+  # default from interrupting play. This only adjusts enrolled accounts.
+  install -d -o "$user" -g "$(id -gn "$user")" -m 0755 "$home_dir/.config"
+  runuser -u "$user" -- kwriteconfig6 --file "$home_dir/.config/kscreenlockerrc" --group Daemon --key Autolock --type bool false
+  runuser -u "$user" -- kwriteconfig6 --file "$home_dir/.config/kscreenlockerrc" --group Daemon --key Timeout 0
+  # Keep the AC power profile active for a lounge player: no idle suspend,
+  # display dimming, or display blanking. This remains per-user.
+  powerdevil_file="$home_dir/.config/powerdevilrc"
+  runuser -u "$user" -- kwriteconfig6 --file "$powerdevil_file" --group AC --group Display --key DimDisplayWhenIdle --type bool false
+  runuser -u "$user" -- kwriteconfig6 --file "$powerdevil_file" --group AC --group Display --key DimDisplayIdleTimeoutSec -- -1
+  runuser -u "$user" -- kwriteconfig6 --file "$powerdevil_file" --group AC --group Display --key TurnOffDisplayWhenIdle --type bool false
+  runuser -u "$user" -- kwriteconfig6 --file "$powerdevil_file" --group AC --group Display --key TurnOffDisplayIdleTimeoutSec -- -1
+  runuser -u "$user" -- kwriteconfig6 --file "$powerdevil_file" --group AC --group SuspendAndShutdown --key AutoSuspendAction 0
 done < <(getent passwd)
 # Insert an idempotent, narrowly scoped PAM include before password-auth.
 if [[ ! -e /etc/pam.d/plasmalogin ]]; then

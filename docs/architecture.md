@@ -66,8 +66,9 @@ The loading cover remains above Plasma panels while Steam starts. It waits for
 Xwayland and then for the Steam Big Picture window, releases its exclusive
 input surface, and keeps that specific Xwayland window active through Steam's
 first minute of startup. A player who has not signed in to Steam on the
-machine is sent to the normal Plasma desktop to complete
-their first Steam login; later Ludus sessions launch Big Picture normally.
+machine is taken to the normal Plasma desktop with Steam opened automatically
+to complete their first Steam login; later Ludus sessions launch Big Picture
+normally.
 
 ---
 

@@ -41,6 +41,11 @@ player's desktop resolution or scale. The WebUI can save a Ludus-owned login
 display mode and scale. It is applied to each enabled output when Plasma Login
 next starts; unsupported modes are safely left at the output default.
 
+For each enrolled player, Ludus disables Plasma's automatic screen lock and
+the AC PowerDevil idle actions (suspend, display dimming, and display blanking)
+in that user's configuration. This is per-user and does not change global
+system power or lock policy.
+
 ## Persistent Data
 
 | Path | Purpose |

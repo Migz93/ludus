@@ -28,6 +28,8 @@ an HTTP endpoint that directly shells out or bypasses the backend's validation.
 
 - enrol and remove players without deleting Linux accounts or home data
 - manage shared-library records, labels, validation, and safe repair
+- view installed Steam games discovered from managed shared-library manifests;
+  malformed and duplicate records are shown without changing them
 - inspect Ludus services, mounts, storage, and `ludusctl doctor` results
 - adopt an existing compatible disk without deleting its data; Ludus grants
   the player group traversal-only access at the filesystem root so a later

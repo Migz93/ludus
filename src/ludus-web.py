@@ -130,7 +130,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(401); self.send_header("WWW-Authenticate", 'Basic realm="Ludus"'); self.send_header("Cache-Control", "no-store"); self.end_headers(); return False
     def do_GET(self):
         if not self.require_auth(): return
-        routes = {"/api/status":"status", "/api/doctor":"doctor", "/api/checks":"doctor.json", "/api/storage":"storage", "/api/users":"users.list", "/api/users/personal-libraries":"users.personal_libraries", "/api/libraries":"libraries.list", "/api/libraries/default":"libraries.default", "/api/libraries/candidates":"libraries.candidates", "/api/libraries/check":"libraries.check", "/api/disks":"disks.list", "/api/settings":"webui.settings", "/api/greeter-display":"greeter.display.settings", "/api/mqtt":"mqtt.settings"}
+        routes = {"/api/status":"status", "/api/doctor":"doctor", "/api/checks":"doctor.json", "/api/storage":"storage", "/api/users":"users.list", "/api/users/personal-libraries":"users.personal_libraries", "/api/libraries":"libraries.list", "/api/libraries/default":"libraries.default", "/api/libraries/candidates":"libraries.candidates", "/api/libraries/check":"libraries.check", "/api/games":"games.list", "/api/disks":"disks.list", "/api/settings":"webui.settings", "/api/greeter-display":"greeter.display.settings", "/api/mqtt":"mqtt.settings"}
         if self.path in ("/", "/index.html"): self.send_page()
         elif self.path in routes: self.send(call(routes[self.path]))
         else: self.send({"ok":False,"error":"not found"}, 404)

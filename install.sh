@@ -112,6 +112,7 @@ install -m 0755 "$project_dir/src/ludus-disks.py" "$install_root/ludus-disks"
 install -m 0755 "$project_dir/src/ludus-steam-register-libraries" "$install_root/ludus-steam-register-libraries"
 install -m 0755 "$project_dir/src/ludus-steam-user-libraries.py" "$install_root/ludus-steam-user-libraries"
 install -m 0755 "$project_dir/src/ludus-storage.py" "$install_root/ludus-storage"
+install -m 0755 "$project_dir/src/ludus-games.py" "$install_root/ludus-games"
 install -m 0755 "$project_dir/src/ludus-mountd.py" "$install_root/ludus-mountd"
 install -m 0755 "$project_dir/src/ludus-mountctl.py" "$install_root/ludus-mountctl"
 install -m 0755 "$project_dir/src/ludus-backend.py" "$install_root/ludus-backend"
@@ -196,6 +197,11 @@ if config.get("port") != 9304:
     os.replace(name, path)
 PY
 [[ -e "$config_dir/libraries.conf" ]] || install -m 0644 /dev/null "$config_dir/libraries.conf"
+if [[ ! -e "$config_dir/game-settings.json" ]]; then
+  printf '%s\n' '{"version":1,"global":{},"games":{}}' > "$config_dir/game-settings.json"
+fi
+chown root:ludus-web "$config_dir/game-settings.json"
+chmod 0640 "$config_dir/game-settings.json"
 if [[ ! -e "$config_dir/mqtt.json" ]]; then
   printf '%s\n' '{"enabled":false,"host":"","port":1883,"username":"","password":"","tls":false,"ca_cert":"","topic_prefix":""}' > "$config_dir/mqtt.json"
   chmod 0600 "$config_dir/mqtt.json"

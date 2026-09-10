@@ -13,7 +13,7 @@ Updated: 2026-08-28
 - Shared Steam-library management with group-owned game content and private
   per-player Proton/shader data binds.
 - Management WebUI for users, libraries, diagnostics, storage, credentials,
-  and optional MQTT configuration.
+  installed-game inventory, and optional MQTT configuration.
 - SELinux policy for optional VS Code Remote SSH forwarding, with checks
   exposed through `ludusctl doctor`.
 - Optional Home Assistant MQTT discovery, player selection, status reporting,

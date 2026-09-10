@@ -20,6 +20,7 @@ MQTT_STATUS = "/run/ludus/mqtt-status.json"
 MQTT_HELPER = "/usr/local/lib/ludus/ludus-mqtt"
 VSCODE_POLICY = "/usr/local/lib/ludus/ludus_vscode_ssh.pp"
 GREETER_DISPLAY_CONFIG = "/etc/ludus/greeter-display.json"
+GAMES_HELPER = "/usr/local/lib/ludus/ludus-games"
 READ = {
     "status": ["status"], "doctor": ["doctor"],
     # Read-only structured reporting for the WebUI. Neither command changes
@@ -259,6 +260,11 @@ def test_mqtt():
 
 def dispatch(request):
     operation = request.get("operation")
+    if operation == "games.list":
+        completed = subprocess.run([GAMES_HELPER], text=True, capture_output=True,
+                                   timeout=30, check=False)
+        return {"ok": completed.returncode == 0, "output": completed.stdout,
+                "error": completed.stderr}
     if operation == "webui.settings":
         with open(WEB_CONFIG, encoding="utf-8") as config_file:
             config = json.load(config_file)

@@ -98,10 +98,16 @@ shared with `root:ludus` group ownership and setgid directories; each active
 player's `compatdata` and shader cache are bind-mounted from private storage
 for that session only. See [shared-libraries.md](shared-libraries.md).
 
+The management WebUI derives its read-only installed-games inventory from the
+`appmanifest_<appid>.acf` files in those managed libraries. The inventory is
+console-wide because game content is shared; it does not inspect a player's
+private Steam account or require a network service.
+
 ### Management WebUI
 
 The WebUI manages users, libraries, diagnostics, disk adoption, authentication,
-and MQTT configuration. Its privileged backend talks to `ludusctl` over a local
+MQTT configuration, and a read-only installed-games inventory. Its privileged
+backend talks to `ludusctl` over a local
 Unix socket; the HTTP frontend does not execute administrative commands itself.
 See [webui.md](webui.md).
 

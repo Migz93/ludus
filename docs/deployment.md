@@ -51,7 +51,7 @@ system power or lock policy.
 | Path | Purpose |
 |---|---|
 | `/usr/local/lib/ludus` | Ludus executables, greeter, UI files, and policy artefacts |
-| `/etc/ludus` | Configuration, WebUI settings, login-display settings, MQTT settings, library records, and install markers |
+| `/etc/ludus` | Configuration, WebUI settings, login-display settings, MQTT settings, library records, the versioned game-settings policy, and install markers |
 | `/var/lib/ludus/backups` | Pre-change login and Steam-autostart backups |
 | `/run/ludus` | WebUI backend socket, MQTT status, and transient requests |
 | `/run/ludus-mount` | Mount control socket and active-session marker |

@@ -350,6 +350,16 @@ const load = {
     const result = requireOk(await api('/api/libraries'), 'The shared library list could not be read.');
     return tsvRows(outputOf(result)).map(([id, path, label]) => ({ id, path, label: label || '' })).filter(entry => entry.path);
   }),
+  games: () => cached('games', async () => {
+    const result = requireOk(await api('/api/games'), 'The installed game list could not be read.');
+    let payload;
+    try { payload = JSON.parse(outputOf(result)); }
+    catch (error) { throw new ApiError('The installed game list could not be understood.'); }
+    if (!payload || payload.version !== 1 || !Array.isArray(payload.games)) {
+      throw new ApiError('The installed game list uses an unsupported format.');
+    }
+    return payload.games;
+  }),
   defaultLibrary: () => cached('default', async () => outputOf(await api('/api/libraries/default')).trim()),
   candidates: () => cached('candidates', async () => {
     const result = await api('/api/libraries/candidates');
@@ -1519,6 +1529,85 @@ async function confirmRemovePersonal(row, button) {
 }
 
 /* ------------------------------------------------------------------ *
+ * View: Installed games
+ * ------------------------------------------------------------------ */
+
+async function viewGames() {
+  const [games, libraries, candidates] = await Promise.all([
+    load.games(), load.libraries(), load.candidates()
+  ]);
+  const installed = games.filter(game => game.status === 'installed');
+  const duplicate = games.filter(game => game.status === 'duplicate');
+  const errors = games.filter(game => game.status === 'error');
+  const installedAppIds = new Set([...installed, ...duplicate].map(game => game.appid));
+
+  return frag(
+    card(
+      cardHead('Installed Steam apps',
+        'Games and Steam components found from manifests in every Ludus-managed shared library.'),
+      notice('info', 'View only',
+        'This page reads Steam’s local install records. It does not start Steam, use the internet, or change any game or player settings.')
+    ),
+    el('div', { class: 'grid grid-3' },
+      statCard({ icon: 'steam', label: 'Installed apps', value: String(installedAppIds.size),
+        note: duplicate.length ? `${duplicate.length} additional duplicate ${plural(duplicate.length, 'manifest')} shown below` : 'Across all managed libraries' }),
+      statCard({ icon: 'libraries', label: 'Managed libraries', value: String(libraries.length),
+        note: libraries.length ? 'Every configured library was checked' : 'Add a shared library to discover games' }),
+      statCard({ icon: errors.length ? 'warn' : 'ok', label: 'Manifest health',
+        value: errors.length ? `${errors.length} to review` : 'All readable',
+        note: errors.length ? 'Other valid games remain available in this list' : 'No malformed install records found' })
+    ),
+    errors.length ? notice('warn', 'Some Steam records could not be read',
+      `${errors.length} ${plural(errors.length, 'manifest needs', 'manifests need')} attention. Each problem is shown below without hiding the other games.`) : null,
+    games.length
+      ? el('div', { class: 'grid grid-2' }, games.map(game => gameCard(game, libraries, candidates)))
+      : empty('steam', 'No installed Steam apps found',
+        libraries.length
+          ? 'Steam has not written any app manifests into the managed shared libraries yet.'
+          : 'Add a shared library first; installed games will then appear here automatically.')
+  );
+}
+
+function gameCard(game, libraries, candidates) {
+  const library = libraries.find(item => item.path === game.library);
+  const title = game.name || (game.appid ? `Unreadable app ${game.appid}` : 'Unreadable library');
+  let stateBadge;
+  if (game.status === 'installed') stateBadge = badge('ok', 'Installed', 'ok');
+  else if (game.status === 'duplicate') stateBadge = badge('warn', 'Duplicate install record', 'warn');
+  else stateBadge = badge('err', 'Manifest problem', 'error');
+  let updated = 'Not recorded';
+  if (Number.isInteger(game.last_updated) && game.last_updated > 0) {
+    try { updated = new Date(game.last_updated * 1000).toLocaleString(); }
+    catch (error) { updated = 'Not recorded'; }
+  }
+
+  return el('section', { class: 'card tile' },
+    el('div', { class: 'tile-top' },
+      el('span', { class: 'tile-mark' }, icon('steam')),
+      el('div', { class: 'game-heading' },
+        el('div', { class: 'tile-title' }, el('span', { text: title }), stateBadge),
+        el('div', { class: 'person-sub', text: game.appid ? `Steam app ${game.appid}` : 'Library scan problem' })
+      )
+    ),
+    game.message ? notice(game.status === 'error' ? 'err' : 'warn',
+      game.status === 'error' ? 'This record was skipped' : 'Installed more than once', game.message) : null,
+    factList([
+      ['Library', library ? libraryTitle(library.path, candidates) : libraryTitle(game.library, candidates)],
+      ['Installed size', formatBytes(game.installed_bytes) || 'Not recorded'],
+      ['Last updated', updated],
+      ['Managed settings', badge(null, 'No settings available yet', 'lock')]
+    ]),
+    disclosure('Technical details', factList([
+      ['App ID', game.appid || 'unavailable'],
+      ['Install folder', game.install_dir || 'unavailable'],
+      ['Library path', el('span', { class: 'path', text: game.library })],
+      ['Manifest', el('span', { class: 'path', text: game.manifest })],
+      library && library.label ? ['Library label', library.label] : null
+    ]), 'card-disclosure')
+  );
+}
+
+/* ------------------------------------------------------------------ *
  * View: Disk tools
  * ------------------------------------------------------------------ */
 
@@ -2217,6 +2306,7 @@ const ROUTES = {
   dashboard: { title: 'Dashboard', subtitle: 'An overview of this Ludus machine.', render: viewDashboard },
   players: { title: 'Players', subtitle: 'Who can sign in and play on this machine.', render: viewPlayers },
   libraries: { title: 'Libraries', subtitle: 'Where shared games are installed and kept.', render: viewLibraries },
+  games: { title: 'Games', subtitle: 'Installed games found in Ludus shared libraries.', render: viewGames },
   disks: { title: 'Disk tools', subtitle: 'Attach another drive so Ludus can use it.', render: viewDisks },
   health: { title: 'Health', subtitle: 'What is working, what needs attention, and how to fix it.', render: viewHealth },
   mqtt: { title: 'MQTT', subtitle: 'Home Assistant status, controls and broker configuration.', render: viewMqtt },

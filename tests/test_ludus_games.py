@@ -36,6 +36,15 @@ class GameInventoryTests(unittest.TestCase):
         self.assertEqual(rows[0]["name"], "Example")
         self.assertEqual(rows[0]["installed_bytes"], 12345)
         self.assertEqual(rows[0]["status"], "installed")
+        self.assertFalse(rows[0]["component"])
+
+    def test_marks_steam_compatibility_components(self):
+        with tempfile.TemporaryDirectory() as root:
+            library = self.library(root, "library")
+            self.write_manifest(library, "10", manifest("10", "Proton Experimental"))
+            self.write_manifest(library, "11", manifest("11", "Steam Linux Runtime 4.0"))
+            rows = GAMES.scan([str(library)])
+        self.assertTrue(all(row["component"] for row in rows))
 
     def test_reports_mismatched_and_malformed_manifests_independently(self):
         with tempfile.TemporaryDirectory() as root:

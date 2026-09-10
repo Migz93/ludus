@@ -130,7 +130,9 @@ def manifest_row(library, entry):
         return {"appid": appid, "name": name.strip(), "library": library,
                 "manifest": path, "install_dir": install_dir,
                 "installed_bytes": installed_bytes, "last_updated": last_updated,
-                "status": "installed", "message": ""}
+                "status": "installed", "message": "",
+                "component": (name.startswith("Proton")
+                              or name.startswith("Steam Linux Runtime"))}
     except (OSError, UnicodeError, ValueError) as error:
         return error_row(library, path, filename_appid, str(error))
 

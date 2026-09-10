@@ -45,6 +45,9 @@ The WebUI Games page reads `steamapps/appmanifest_<appid>.acf` from every
 configured shared library. It shows games and Steam components with their app
 ID, name, install directory, recorded size and update time without starting
 Steam or using the network.
+Compatibility components whose names begin with `Proton` or
+`Steam Linux Runtime` remain in the inventory data for diagnostics but are
+hidden from the playable-game poster grid.
 Malformed, mismatched and duplicate manifests are reported separately and do
 not prevent valid games from appearing.
 

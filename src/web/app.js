@@ -1536,7 +1536,7 @@ const GAME_PAGE_SIZE = 24;
 
 async function viewGames() {
   const games = await load.games();
-  const routable = games.filter(game => game.appid);
+  const routable = games.filter(game => game.appid && !game.component);
   const errors = games.filter(game => game.status === 'error');
   const totalPages = Math.max(1, Math.ceil(routable.length / GAME_PAGE_SIZE));
   const requestedPage = Number((state.routeContext && state.routeContext.page) || 1);

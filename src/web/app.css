@@ -505,7 +505,7 @@ select {
 .poster-state[data-tone="warn"] { color: var(--warn-text); }
 .poster-state[data-tone="err"] { color: var(--err-text); }
 
-.pagination { display: flex; align-items: center; justify-content: center; gap: 9px; }
+.pagination { display: flex; align-items: center; justify-content: flex-end; gap: 9px; }
 .pagination-label { color: var(--text-dim); font-size: 13px; min-width: 78px; text-align: center; }
 .pagination-button {
   display: grid; place-items: center;

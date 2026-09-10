@@ -1532,72 +1532,126 @@ async function confirmRemovePersonal(row, button) {
  * View: Installed games
  * ------------------------------------------------------------------ */
 
+const GAME_PAGE_SIZE = 24;
+
 async function viewGames() {
-  const [games, libraries, candidates] = await Promise.all([
-    load.games(), load.libraries(), load.candidates()
-  ]);
-  const installed = games.filter(game => game.status === 'installed');
-  const duplicate = games.filter(game => game.status === 'duplicate');
+  const games = await load.games();
+  const routable = games.filter(game => game.appid);
   const errors = games.filter(game => game.status === 'error');
-  const installedAppIds = new Set([...installed, ...duplicate].map(game => game.appid));
+  const totalPages = Math.max(1, Math.ceil(routable.length / GAME_PAGE_SIZE));
+  const requestedPage = Number((state.routeContext && state.routeContext.page) || 1);
+  const page = Math.min(totalPages, Math.max(1, requestedPage));
+  const pageGames = routable.slice((page - 1) * GAME_PAGE_SIZE, page * GAME_PAGE_SIZE);
 
   return frag(
-    el('div', { class: 'grid grid-3' },
-      statCard({ icon: 'steam', label: 'Installed apps', value: String(installedAppIds.size),
-        note: duplicate.length ? `${duplicate.length} additional duplicate ${plural(duplicate.length, 'manifest')} shown below` : 'Across all managed libraries' }),
-      statCard({ icon: 'libraries', label: 'Managed libraries', value: String(libraries.length),
-        note: libraries.length ? 'Every configured library was checked' : 'Add a shared library to discover games' }),
-      statCard({ icon: errors.length ? 'warn' : 'ok', label: 'Manifest health',
-        value: errors.length ? `${errors.length} to review` : 'All readable',
-        note: errors.length ? 'Other valid games remain available in this list' : 'No malformed install records found' })
-    ),
     errors.length ? notice('warn', 'Some Steam records could not be read',
       `${errors.length} ${plural(errors.length, 'manifest needs', 'manifests need')} attention. Each problem is shown below without hiding the other games.`) : null,
-    games.length
-      ? el('div', { class: 'grid grid-2' }, games.map(game => gameCard(game, libraries, candidates)))
+    routable.length
+      ? frag(
+        el('div', { class: 'game-grid-meta' },
+          el('span', { text: `${routable.length} installed ${plural(routable.length, 'app')}` }),
+          totalPages > 1 ? el('span', { text: `Page ${page} of ${totalPages}` }) : null),
+        el('div', { class: 'poster-grid' }, pageGames.map(game => gamePoster(game))),
+        totalPages > 1 ? gamePagination(page, totalPages) : null)
       : empty('steam', 'No installed Steam apps found',
-        libraries.length
-          ? 'Steam has not written any app manifests into the managed shared libraries yet.'
-          : 'Add a shared library first; installed games will then appear here automatically.')
+        'Steam has not written any app manifests into the managed shared libraries yet.')
   );
 }
 
-function gameCard(game, libraries, candidates) {
+function posterImage(game) {
+  const fallback = el('span', { class: 'poster-fallback' }, icon('steam'),
+    el('span', { text: game.name || `Steam app ${game.appid}` }));
+  if (!game.artwork) return fallback;
+  const image = el('img', {
+    src: `/api/games/${game.appid}/poster`, alt: '', loading: 'lazy',
+    class: `poster-image poster-image-${game.artwork}`
+  });
+  image.addEventListener('error', () => image.replaceWith(fallback));
+  return image;
+}
+
+function gamePoster(game) {
+  const size = formatBytes(game.installed_bytes) || 'Size not recorded';
+  return el('a', { class: 'poster-card', href: `#/games/${game.appid}`,
+    'aria-label': `${game.name || `Steam app ${game.appid}`}, ${size}` },
+    posterImage(game),
+    el('span', { class: 'poster-shade', 'aria-hidden': 'true' }),
+    game.status !== 'installed' ? el('span', {
+      class: 'poster-state', dataset: { tone: game.status === 'duplicate' ? 'warn' : 'err' },
+      title: game.message || game.status
+    }, icon(game.status === 'duplicate' ? 'warn' : 'error', 'icon icon-sm')) : null,
+    el('span', { class: 'poster-copy' },
+      el('strong', { text: game.name || `Steam app ${game.appid}` }),
+      el('span', { text: size })
+    )
+  );
+}
+
+function gamePagination(page, totalPages) {
+  const target = number => `#/games/page/${number}`;
+  return el('nav', { class: 'pagination', 'aria-label': 'Game pages' },
+    page > 1
+      ? el('a', { class: 'btn btn-sm', href: target(page - 1), 'aria-label': 'Previous page' }, icon('chevron'), el('span', { text: 'Previous' }))
+      : el('span', { class: 'btn btn-sm pagination-disabled', 'aria-hidden': 'true' }, icon('chevron'), el('span', { text: 'Previous' })),
+    el('span', { class: 'pagination-label', text: `Page ${page} of ${totalPages}` }),
+    page < totalPages
+      ? el('a', { class: 'btn btn-sm pagination-next', href: target(page + 1), 'aria-label': 'Next page' }, el('span', { text: 'Next' }), icon('chevron'))
+      : el('span', { class: 'btn btn-sm pagination-next pagination-disabled', 'aria-hidden': 'true' }, el('span', { text: 'Next' }), icon('chevron'))
+  );
+}
+
+async function viewGame() {
+  const [games, libraries, candidates] = await Promise.all([
+    load.games(), load.libraries(), load.candidates()
+  ]);
+  const appid = state.routeContext && state.routeContext.appid;
+  const game = games.find(item => item.appid === appid);
+  if (!game) return notice('err', 'Game not found',
+    'This app is no longer present in a Ludus-managed shared library.', [link('Back to games', 'games', 'arrow')]);
   const library = libraries.find(item => item.path === game.library);
-  const title = game.name || (game.appid ? `Unreadable app ${game.appid}` : 'Unreadable library');
-  let stateBadge;
-  if (game.status === 'installed') stateBadge = badge('ok', 'Installed', 'ok');
-  else if (game.status === 'duplicate') stateBadge = badge('warn', 'Duplicate install record', 'warn');
-  else stateBadge = badge('err', 'Manifest problem', 'error');
+  const sourcePage = Math.floor(games.findIndex(item => item === game) / GAME_PAGE_SIZE) + 1;
+  const backHref = sourcePage > 1 ? `#/games/page/${sourcePage}` : '#/games';
+  pageTitle.textContent = game.name || `Steam app ${appid}`;
+  pageSubtitle.textContent = `Steam app ${appid}`;
+  document.title = `Ludus — ${game.name || `Steam app ${appid}`}`;
   let updated = 'Not recorded';
   if (Number.isInteger(game.last_updated) && game.last_updated > 0) {
     try { updated = new Date(game.last_updated * 1000).toLocaleString(); }
     catch (error) { updated = 'Not recorded'; }
   }
+  const status = game.status === 'installed'
+    ? badge('ok', 'Installed', 'ok')
+    : badge(game.status === 'duplicate' ? 'warn' : 'err',
+      game.status === 'duplicate' ? 'Duplicate install record' : 'Manifest problem',
+      game.status === 'duplicate' ? 'warn' : 'error');
 
-  return el('section', { class: 'card tile' },
-    el('div', { class: 'tile-top' },
-      el('span', { class: 'tile-mark' }, icon('steam')),
-      el('div', { class: 'game-heading' },
-        el('div', { class: 'tile-title' }, el('span', { text: title }), stateBadge),
-        el('div', { class: 'person-sub', text: game.appid ? `Steam app ${game.appid}` : 'Library scan problem' })
+  return frag(
+    el('div', { class: 'actions' },
+      el('a', { class: 'btn btn-sm game-back', href: backHref }, icon('arrow'), el('span', { text: 'Back to games' }))),
+    el('section', { class: 'card game-detail' },
+      el('div', { class: 'game-detail-poster' }, posterImage(game)),
+      el('div', { class: 'game-detail-body' },
+        el('div', { class: 'game-detail-title' },
+          el('div', null, el('h2', { text: game.name || `Steam app ${appid}` }),
+            el('p', { text: `Steam app ${appid}` })), status),
+        game.message ? notice(game.status === 'error' ? 'err' : 'warn',
+          game.status === 'error' ? 'This record was skipped' : 'Installed more than once', game.message) : null,
+        factList([
+          ['Library', library ? libraryTitle(library.path, candidates) : libraryTitle(game.library, candidates)],
+          ['Installed size', formatBytes(game.installed_bytes) || 'Not recorded'],
+          ['Last updated', updated],
+          ['Install folder', game.install_dir || 'Not recorded'],
+          ['Managed settings', badge(null, 'No settings available yet', 'lock')]
+        ]),
+        disclosure('Technical details', factList([
+          ['App ID', game.appid],
+          ['Library path', el('span', { class: 'path', text: game.library })],
+          ['Manifest', el('span', { class: 'path', text: game.manifest })],
+          ['Artwork', game.artwork ? `${humanise(game.artwork)} Steam artwork cached by Ludus` : 'No artwork available'],
+          library && library.label ? ['Library label', library.label] : null
+        ]), 'card-disclosure')
       )
-    ),
-    game.message ? notice(game.status === 'error' ? 'err' : 'warn',
-      game.status === 'error' ? 'This record was skipped' : 'Installed more than once', game.message) : null,
-    factList([
-      ['Library', library ? libraryTitle(library.path, candidates) : libraryTitle(game.library, candidates)],
-      ['Installed size', formatBytes(game.installed_bytes) || 'Not recorded'],
-      ['Last updated', updated],
-      ['Managed settings', badge(null, 'No settings available yet', 'lock')]
-    ]),
-    disclosure('Technical details', factList([
-      ['App ID', game.appid || 'unavailable'],
-      ['Install folder', game.install_dir || 'unavailable'],
-      ['Library path', el('span', { class: 'path', text: game.library })],
-      ['Manifest', el('span', { class: 'path', text: game.manifest })],
-      library && library.label ? ['Library label', library.label] : null
-    ]), 'card-disclosure')
+    )
   );
 }
 
@@ -2301,13 +2355,14 @@ const ROUTES = {
   players: { title: 'Players', subtitle: 'Who can sign in and play on this machine.', render: viewPlayers },
   libraries: { title: 'Libraries', subtitle: 'Where shared games are installed and kept.', render: viewLibraries },
   games: { title: 'Games', subtitle: 'Installed games found in Ludus shared libraries.', render: viewGames },
+  game: { title: 'Game details', subtitle: 'Installed Steam app information.', render: viewGame },
   disks: { title: 'Disk tools', subtitle: 'Attach another drive so Ludus can use it.', render: viewDisks },
   health: { title: 'Health', subtitle: 'What is working, what needs attention, and how to fix it.', render: viewHealth },
   mqtt: { title: 'MQTT', subtitle: 'Home Assistant status, controls and broker configuration.', render: viewMqtt },
   settings: { title: 'Settings', subtitle: 'Sign-in and compatibility options for this control panel.', render: viewSettings }
 };
 
-const state = { checkedAt: null, flash: null, token: 0 };
+const state = { checkedAt: null, flash: null, token: 0, routeContext: null };
 
 const view = document.getElementById('view');
 const pageTitle = document.getElementById('page-title');
@@ -2317,9 +2372,17 @@ const refreshButton = document.getElementById('refresh');
 const sidebarDot = document.getElementById('sidebar-dot');
 const sidebarState = document.getElementById('sidebar-state');
 
+function routeContext() {
+  const path = location.hash.replace(/^#\/?/, '');
+  let match = /^games\/([0-9]+)$/.exec(path);
+  if (match) return { name: 'game', appid: match[1] };
+  match = /^games\/page\/([0-9]+)$/.exec(path);
+  if (match) return { name: 'games', page: Number(match[1]) };
+  return { name: ROUTES[path] ? path : 'dashboard' };
+}
+
 function currentRoute() {
-  const name = location.hash.replace(/^#\/?/, '');
-  return ROUTES[name] ? name : 'dashboard';
+  return routeContext().name;
 }
 
 function skeleton() {
@@ -2364,12 +2427,13 @@ async function navigate(options) {
   const settings = options || {};
   if (!settings.keepFlash) state.flash = null;
 
-  const name = currentRoute();
+  state.routeContext = routeContext();
+  const name = state.routeContext.name;
   const route = ROUTES[name];
   const token = ++state.token;
 
   for (const item of document.querySelectorAll('.nav-item')) {
-    if (item.dataset.route === name) item.setAttribute('aria-current', 'page');
+    if (item.dataset.route === name || (name === 'game' && item.dataset.route === 'games')) item.setAttribute('aria-current', 'page');
     else item.removeAttribute('aria-current');
   }
   pageTitle.textContent = route.title;

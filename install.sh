@@ -84,6 +84,7 @@ backup=/var/lib/ludus/backups/$(date +%Y%m%d-%H%M%S)
 install -d -m 0700 "$backup" /var/lib/ludus
 install -d -m 0755 "$config_dir"
 install -d -m 0755 "$install_root"
+install -d -o root -g root -m 0755 /var/cache/ludus
 install -d -m 0755 /etc/systemd/user/plasma-login.service.d /usr/local/share/wayland-sessions
 for file in /etc/pam.d/plasmalogin /etc/pam.d/plasmalogin-ludus /etc/systemd/user/plasma-login.service.d/ludus.conf "$unit_dir/ludus.service" /usr/local/share/wayland-sessions/ludus.desktop; do
   [[ -e "$file" ]] && install -D -m 0600 "$file" "$backup$file"
@@ -164,6 +165,7 @@ if ! id ludus-web >/dev/null 2>&1; then
   useradd --system -g ludus-web -M -s /usr/sbin/nologin ludus-web
   : > "$config_dir/created-ludus-web-user"
 fi
+install -d -o root -g ludus-web -m 0750 /var/cache/ludus/game-art
 if [[ ! -e "$config_dir/webui.json" ]] || python3 -c 'import json, sys; sys.exit(json.load(open(sys.argv[1])).get("auth_mode") != "none")' "$config_dir/webui.json"; then
   # PAM service ludus-web authorizes only members of the local wheel group.
   # Upgrade old unauthenticated configurations to that secure default too.

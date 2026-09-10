@@ -94,6 +94,7 @@ if [[ -e /etc/ludus/created-ludus-web-group ]] && ! getent passwd ludus-web >/de
 fi
 rm -f /usr/local/bin/ludusctl
 rm -rf /usr/local/lib/ludus /etc/ludus
+rm -rf /var/cache/ludus
 systemctl daemon-reload
 echo "Ludus removed. Normal Plasma Login is restored; restart plasmalogin or reboot when safe."
 echo "Ludus build dependencies layered with rpm-ostree were intentionally kept. To remove only packages you no longer need, run rpm-ostree status, then sudo rpm-ostree uninstall <package...> and reboot."

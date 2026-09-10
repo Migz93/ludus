@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Small authenticated management UI; privileged actions go via ludus-backend."""
-import base64, hashlib, hmac, ipaddress, json, os, secrets, socket, subprocess, threading, time
+import base64, hashlib, hmac, ipaddress, json, os, re, secrets, socket, stat, subprocess, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 CONF = "/etc/ludus/webui.json"
 SOCK = "/run/ludus/backend.sock"
 ASSETS = os.path.join(os.path.dirname(os.path.realpath(__file__)), "web")
+ARTWORK_CACHE = "/var/cache/ludus/game-art"
+MAX_ARTWORK_BYTES = 5 * 1024 * 1024
 MAX_BODY = 8192
 MAX_HTTP_WORKERS = 16
 HTTP_SOCKET_TIMEOUT = 15
@@ -125,14 +127,41 @@ class Handler(BaseHTTPRequestHandler):
         policy = ("default-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; "
                   f"img-src 'self' data:; style-src 'unsafe-inline'; script-src 'nonce-{nonce}'; connect-src 'self'")
         self.send(PAGE.replace("{{NONCE}}", nonce), content_type="text/html; charset=utf-8", extra=[("Content-Security-Policy", policy)])
+    def send_poster(self, appid):
+        for layout in ("portrait", "wide"):
+            for suffix, content_type in (("jpg", "image/jpeg"), ("png", "image/png")):
+                path = os.path.join(ARTWORK_CACHE, f"{appid}.{layout}.{suffix}")
+                try:
+                    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+                    with os.fdopen(descriptor, "rb") as source:
+                        details = os.fstat(source.fileno())
+                        if not stat.S_ISREG(details.st_mode) or details.st_size > MAX_ARTWORK_BYTES:
+                            continue
+                        body = source.read(MAX_ARTWORK_BYTES + 1)
+                    if len(body) > MAX_ARTWORK_BYTES:
+                        continue
+                    self.send_response(200)
+                    self.send_header("Content-Type", content_type)
+                    self.send_header("Content-Length", str(len(body)))
+                    self.send_header("Cache-Control", "private, max-age=86400")
+                    self.send_header("X-Content-Type-Options", "nosniff")
+                    self.send_header("X-Frame-Options", "DENY")
+                    self.send_header("Referrer-Policy", "no-referrer")
+                    self.end_headers(); self.wfile.write(body)
+                    return
+                except OSError:
+                    continue
+        self.send({"ok":False,"error":"poster not found"}, 404)
     def require_auth(self):
         if self.authenticated(): return True
         self.send_response(401); self.send_header("WWW-Authenticate", 'Basic realm="Ludus"'); self.send_header("Cache-Control", "no-store"); self.end_headers(); return False
     def do_GET(self):
         if not self.require_auth(): return
         routes = {"/api/status":"status", "/api/doctor":"doctor", "/api/checks":"doctor.json", "/api/storage":"storage", "/api/users":"users.list", "/api/users/personal-libraries":"users.personal_libraries", "/api/libraries":"libraries.list", "/api/libraries/default":"libraries.default", "/api/libraries/candidates":"libraries.candidates", "/api/libraries/check":"libraries.check", "/api/games":"games.list", "/api/disks":"disks.list", "/api/settings":"webui.settings", "/api/greeter-display":"greeter.display.settings", "/api/mqtt":"mqtt.settings"}
+        poster = re.fullmatch(r"/api/games/([0-9]+)/poster", self.path)
         if self.path in ("/", "/index.html"): self.send_page()
         elif self.path in routes: self.send(call(routes[self.path]))
+        elif poster: self.send_poster(poster.group(1))
         else: self.send({"ok":False,"error":"not found"}, 404)
     def do_POST(self):
         if not self.require_auth(): return

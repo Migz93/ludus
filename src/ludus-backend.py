@@ -262,7 +262,7 @@ def dispatch(request):
     operation = request.get("operation")
     if operation == "games.list":
         completed = subprocess.run([GAMES_HELPER], text=True, capture_output=True,
-                                   timeout=30, check=False)
+                                   timeout=120, check=False)
         return {"ok": completed.returncode == 0, "output": completed.stdout,
                 "error": completed.stderr}
     if operation == "webui.settings":

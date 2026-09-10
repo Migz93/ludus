@@ -77,6 +77,11 @@ class GameInventoryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "duplicate KeyValues key"):
             GAMES.parse_keyvalues('"AppState" { "appid" "10" "appid" "11" }')
 
+    def test_accepts_only_supported_image_signatures(self):
+        self.assertEqual(GAMES.image_kind(b"\xff\xd8\xffdata"), "jpg")
+        self.assertEqual(GAMES.image_kind(b"\x89PNG\r\n\x1a\ndata"), "png")
+        self.assertEqual(GAMES.image_kind(b"GIF89a"), "")
+
 
 if __name__ == "__main__":
     unittest.main()

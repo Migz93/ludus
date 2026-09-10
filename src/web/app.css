@@ -427,6 +427,111 @@ select {
 }
 .tile-title { font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
+/* ---------- Game posters ---------- */
+
+.game-grid-meta {
+  display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  color: var(--text-faint); font-size: 13px;
+}
+
+.poster-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.poster-card {
+  position: relative;
+  display: block;
+  aspect-ratio: 2 / 3;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-2);
+  color: var(--text);
+  text-decoration: none;
+  box-shadow: var(--shadow);
+  transition: transform .24s ease, border-color .24s ease, box-shadow .24s ease;
+}
+.poster-card:hover, .poster-card:focus-visible {
+  transform: scale(1.045);
+  border-color: var(--accent-line);
+  box-shadow: 0 14px 32px -12px rgba(0, 0, 0, .9);
+  z-index: 1;
+}
+
+.poster-image, .poster-fallback {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+}
+.poster-image { display: block; object-fit: cover; }
+.poster-image-wide { object-position: center; }
+.poster-fallback {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 10px; padding: 16px; text-align: center;
+  color: var(--text-dim);
+  background: radial-gradient(circle at 50% 35%, var(--surface-3), var(--surface-2) 65%);
+  font-size: 13px; line-height: 1.3;
+}
+.poster-fallback .icon { width: 30px; height: 30px; color: var(--text-faint); }
+.poster-shade {
+  position: absolute; inset: 0;
+  background: linear-gradient(180deg, transparent 25%, rgba(8, 11, 15, .96) 100%);
+  opacity: 0;
+  transition: opacity .24s ease;
+}
+.poster-copy {
+  position: absolute; inset: auto 0 0;
+  display: flex; flex-direction: column; align-items: flex-start; gap: 4px;
+  padding: 34px 11px 11px;
+  opacity: 0;
+  transform: translateY(7px);
+  transition: opacity .24s ease, transform .24s ease;
+}
+.poster-copy strong { font-size: 16px; line-height: 1.15; }
+.poster-copy > span { color: rgba(232, 238, 245, .72); font-size: 12px; }
+.poster-card:hover .poster-shade, .poster-card:focus-visible .poster-shade,
+.poster-card:hover .poster-copy, .poster-card:focus-visible .poster-copy { opacity: 1; }
+.poster-card:hover .poster-copy, .poster-card:focus-visible .poster-copy { transform: translateY(0); }
+.poster-state {
+  position: absolute; top: 7px; right: 7px;
+  display: grid; place-items: center;
+  width: 25px; height: 25px;
+  border-radius: 50%;
+  background: rgba(8, 11, 15, .88);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .7);
+}
+.poster-state[data-tone="warn"] { color: var(--warn-text); }
+.poster-state[data-tone="err"] { color: var(--err-text); }
+
+.pagination { display: flex; align-items: center; justify-content: flex-end; gap: 9px; }
+.pagination-label { color: var(--text-dim); font-size: 13px; min-width: 78px; text-align: center; }
+.pagination-button {
+  display: grid; place-items: center;
+  width: 32px; height: 32px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: var(--text-dim);
+  text-decoration: none;
+}
+.pagination-button:hover { background: var(--surface-3); color: var(--text); border-color: #45525f; }
+.pagination-button .icon { width: 16px; height: 16px; transform: rotate(90deg); }
+.pagination-next .icon { transform: rotate(-90deg); }
+.pagination-disabled { opacity: .38; pointer-events: none; }
+.game-back .icon { transform: rotate(180deg); }
+
+.game-detail { display: grid; grid-template-columns: minmax(180px, 270px) minmax(0, 1fr); gap: 24px; }
+.game-detail-poster {
+  position: relative; aspect-ratio: 2 / 3; overflow: hidden;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--surface-2);
+}
+.game-detail-body { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+.game-detail-title { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.game-detail-title h2 { font-size: 24px; line-height: 1.2; }
+.game-detail-title p { color: var(--text-faint); font-size: 13px; margin-top: 4px; }
+
 .facts { display: grid; gap: 9px; }
 .fact { display: grid; grid-template-columns: 132px minmax(0, 1fr); gap: 12px; font-size: 13.5px; align-items: baseline; }
 .fact dt { color: var(--text-faint); }
@@ -496,6 +601,9 @@ details.disclosure > summary:hover { color: var(--text-dim); }
 details.disclosure > summary .icon-sm { transition: transform .15s ease; }
 details.disclosure[open] > summary .icon-sm { transform: rotate(180deg); }
 @media (prefers-reduced-motion: reduce) { details.disclosure > summary .icon-sm { transition: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .poster-card, .poster-shade, .poster-copy { transition: none; }
+}
 details.disclosure .disclosure-body { padding: 0 18px 14px; }
 
 details.card-disclosure { border: 1px solid var(--line); border-radius: var(--r-md); background: var(--bg-elevated); }
@@ -646,4 +754,16 @@ dialog.modal:not([open]) { display: none; }
   .content { padding: 20px 20px 56px; }
   .hero { flex-wrap: wrap; }
   .fact { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .poster-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+@media (max-width: 680px) {
+  .poster-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+  .game-detail { grid-template-columns: minmax(0, 1fr); }
+  .game-detail-poster { width: min(260px, 100%); margin-inline: auto; }
+}
+
+@media (max-width: 430px) {
+  .poster-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .poster-copy strong { font-size: 15px; }
 }

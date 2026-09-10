@@ -39,6 +39,31 @@ Ludus records the administrator's preferred library in
 per player, so select the library in Steam's Storage UI for each Steam-ready
 player. Other configured libraries remain available as alternate locations.
 
+## Installed Game Inventory
+
+The WebUI Games page reads `steamapps/appmanifest_<appid>.acf` from every
+configured shared library. It shows games and Steam components with their app
+ID, name, install directory, recorded size and update time without starting
+Steam or using the network.
+Compatibility components whose names begin with `Proton` or
+`Steam Linux Runtime` remain in the inventory data for diagnostics but are
+hidden from the playable-game poster grid.
+Malformed, mismatched and duplicate manifests are reported separately and do
+not prevent valid games from appearing.
+
+The Games page uses Steam's cached `library_600x900` portrait from an enrolled
+player when one already exists locally. Otherwise the privileged inventory
+helper requests the fixed portrait URL for that numeric app ID from Steam's
+official CDN, then tries the wide library hero as a fallback. It validates the
+size and image signature and copies only the image bytes into
+`/var/cache/ludus/game-art`; the WebUI never receives a path into a player's
+private home. Failed lookups are retried after 24 hours rather than on every
+page load.
+
+`/etc/ludus/game-settings.json` is the versioned console-wide policy store for
+later managed game features. The inventory is read-only: this foundation does
+not change the policy, player Steam data, game content or Proton prefixes.
+
 ## Safety Rules
 
 - All parent directories must be traversable by members of the `ludus` group.

@@ -1542,12 +1542,6 @@ async function viewGames() {
   const installedAppIds = new Set([...installed, ...duplicate].map(game => game.appid));
 
   return frag(
-    card(
-      cardHead('Installed Steam apps',
-        'Games and Steam components found from manifests in every Ludus-managed shared library.'),
-      notice('info', 'View only',
-        'This page reads Steam’s local install records. It does not start Steam, use the internet, or change any game or player settings.')
-    ),
     el('div', { class: 'grid grid-3' },
       statCard({ icon: 'steam', label: 'Installed apps', value: String(installedAppIds.size),
         note: duplicate.length ? `${duplicate.length} additional duplicate ${plural(duplicate.length, 'manifest')} shown below` : 'Across all managed libraries' }),

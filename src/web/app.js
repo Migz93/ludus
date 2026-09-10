@@ -1553,9 +1553,11 @@ function dpiOptions(includeGameModes, selected) {
   return options;
 }
 
-function dpiWarning() {
-  return notice('warn', 'This changes Wine interface scaling',
-    'It can affect Windows launchers, configuration tools, or games, and may make an already-correct interface oversized or clipped. It does not change game render resolution.');
+function dpiInfo() {
+  const message = 'Adjusts Wine interface scaling to help a tiny Steam overlay. It may make some launchers or already-correct interfaces too large or clipped; game render resolution is unchanged.';
+  return el('span', { class: 'info-tip', tabindex: '0', 'aria-label': message },
+    el('span', { class: 'info-tip-mark', 'aria-hidden': 'true', text: 'i' }),
+    el('span', { class: 'info-tip-text', role: 'tooltip', text: message }));
 }
 
 async function viewGames() {
@@ -1569,23 +1571,20 @@ async function viewGames() {
 
   return frag(
     card(
-      cardHead('Proton overlay DPI', 'Console-wide default applied to each player’s existing prefixes before Steam starts.'),
-      dpiWarning(),
       (() => {
         const select = el('select', { 'aria-label': 'Console-wide Proton overlay DPI' },
           dpiOptions(false, dpi.global.proton_overlay_dpi));
-        const button = el('button', { class: 'btn btn-primary', type: 'submit' }, icon('ok'), el('span', { text: 'Save default' }));
-        return el('form', { class: 'form-row', onSubmit: event => {
-          event.preventDefault();
+        select.addEventListener('change', () => {
           const value = select.value === 'disabled' ? null : Number(select.value);
-          mutate(button, { path: '/api/games/proton-dpi', body: { scope: 'global', dpi: value },
+          mutate(select, { path: '/api/games/proton-dpi', body: { scope: 'global', dpi: value },
             busyLabel: 'Saving…', success: 'Proton overlay DPI default saved',
             detail: value ? `${value}% will be applied at each player’s next login.` : 'Any managed values are queued for per-player restoration.',
             failure: 'The Proton overlay DPI default could not be saved' });
-        }},
-          el('div', { class: 'field' }, el('label', { text: 'Console default' }), select,
-            el('span', { class: 'help', text: 'Disabled by default. Per-game settings can inherit, disable, or override it.' })),
-          button);
+        });
+        return el('div', { class: 'compact-setting' },
+          el('label', { class: 'compact-setting-label' },
+            el('span', { text: 'Proton overlay DPI' }), dpiInfo()),
+          select);
       })()
     ),
     errors.length ? notice('warn', 'Some Steam records could not be read',
@@ -1670,7 +1669,14 @@ async function viewGame() {
     .filter(([, record]) => record);
   const policySelect = el('select', { 'aria-label': 'Game Proton overlay DPI policy' },
     dpiOptions(true, savedPolicy));
-  const policyButton = el('button', { class: 'btn btn-primary', type: 'submit' }, icon('ok'), el('span', { text: 'Save game setting' }));
+  policySelect.addEventListener('change', () => {
+    const raw = policySelect.value;
+    const policy = raw === 'inherit' || raw === 'disabled' ? raw : Number(raw);
+    mutate(policySelect, { path: '/api/games/proton-dpi', body: { scope: 'game', appid, policy },
+      busyLabel: 'Saving…', success: 'Game Proton DPI setting saved',
+      detail: policy === 'disabled' ? 'Managed values are queued for restoration on each affected player’s next login.' : 'The setting applies on each player’s next login.',
+      failure: 'The game Proton DPI setting could not be saved' });
+  });
   return frag(
     el('div', { class: 'actions' },
       el('a', { class: 'btn btn-sm game-back', href: backHref }, icon('arrow'), el('span', { text: 'Back to games' }))),
@@ -1694,18 +1700,10 @@ async function viewGame() {
       )
     ),
     card(
-      cardHead('Proton overlay DPI', 'Override the console default for this game. Changes apply separately when each player next logs in.'),
-      dpiWarning(),
-      el('form', { class: 'form-row', onSubmit: event => {
-        event.preventDefault();
-        const raw = policySelect.value;
-        const policy = raw === 'inherit' || raw === 'disabled' ? raw : Number(raw);
-        mutate(policyButton, { path: '/api/games/proton-dpi', body: { scope: 'game', appid, policy },
-          busyLabel: 'Saving…', success: 'Game Proton DPI setting saved',
-          detail: policy === 'disabled' ? 'Managed values are queued for restoration on each affected player’s next login.' : 'The setting applies on each player’s next login.',
-          failure: 'The game Proton DPI setting could not be saved' });
-      }},
-        el('div', { class: 'field' }, el('label', { text: 'This game' }), policySelect), policyButton),
+      el('div', { class: 'compact-setting' },
+        el('label', { class: 'compact-setting-label' },
+          el('span', { text: 'Proton overlay DPI' }), dpiInfo()),
+        policySelect),
       el('div', { class: 'dpi-status' },
         el('strong', { text: 'Latest reconciliation by player' }),
         playerStates.length ? el('dl', { class: 'review' }, playerStates.map(([user, record]) =>

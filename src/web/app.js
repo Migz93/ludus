@@ -1601,8 +1601,8 @@ function gamePagination(page, totalPages) {
 }
 
 async function viewGame() {
-  const [games, libraries, candidates] = await Promise.all([
-    load.games(), load.libraries(), load.candidates()
+  const [games, libraries] = await Promise.all([
+    load.games(), load.libraries()
   ]);
   const appid = state.routeContext && state.routeContext.appid;
   const game = games.find(item => item.appid === appid);
@@ -1619,12 +1619,6 @@ async function viewGame() {
     try { updated = new Date(game.last_updated * 1000).toLocaleString(); }
     catch (error) { updated = 'Not recorded'; }
   }
-  const status = game.status === 'installed'
-    ? badge('ok', 'Installed', 'ok')
-    : badge(game.status === 'duplicate' ? 'warn' : 'err',
-      game.status === 'duplicate' ? 'Duplicate install record' : 'Manifest problem',
-      game.status === 'duplicate' ? 'warn' : 'error');
-
   return frag(
     el('div', { class: 'actions' },
       el('a', { class: 'btn btn-sm game-back', href: backHref }, icon('arrow'), el('span', { text: 'Back to games' }))),
@@ -1633,23 +1627,18 @@ async function viewGame() {
       el('div', { class: 'game-detail-body' },
         el('div', { class: 'game-detail-title' },
           el('div', null, el('h2', { text: game.name || `Steam app ${appid}` }),
-            el('p', { text: `Steam app ${appid}` })), status),
+            el('p', { text: `Steam app ${appid}` }))),
         game.message ? notice(game.status === 'error' ? 'err' : 'warn',
           game.status === 'error' ? 'This record was skipped' : 'Installed more than once', game.message) : null,
         factList([
-          ['Library', library ? libraryTitle(library.path, candidates) : libraryTitle(game.library, candidates)],
           ['Installed size', formatBytes(game.installed_bytes) || 'Not recorded'],
           ['Last updated', updated],
-          ['Install folder', game.install_dir || 'Not recorded'],
-          ['Managed settings', badge(null, 'No settings available yet', 'lock')]
-        ]),
-        disclosure('Technical details', factList([
+          ['Library label', library && library.label ? library.label : 'No label'],
           ['App ID', game.appid],
           ['Library path', el('span', { class: 'path', text: game.library })],
           ['Manifest', el('span', { class: 'path', text: game.manifest })],
-          ['Artwork', game.artwork ? `${humanise(game.artwork)} Steam artwork cached by Ludus` : 'No artwork available'],
-          library && library.label ? ['Library label', library.label] : null
-        ]), 'card-disclosure')
+          ['Managed settings', badge(null, 'No settings available yet', 'lock')]
+        ])
       )
     )
   );

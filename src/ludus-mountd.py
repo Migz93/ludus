@@ -70,6 +70,10 @@ def mount_for(user):
     with open(ACTIVE_USER, "w", encoding="utf-8") as file:
         file.write(user + "\n")
     os.chmod(ACTIVE_USER, 0o600)
+    # Prefix policy is evaluated only after every compatdata bind belongs to
+    # this user, and this request must finish before ludus-steam can start.
+    subprocess.run(["/usr/local/lib/ludus/ludus-proton-dpi", "reconcile", user],
+                   check=True, timeout=120)
 
 def unmount_for(user):
     if os.path.exists(ACTIVE_USER):

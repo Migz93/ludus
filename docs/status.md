@@ -14,6 +14,8 @@ Updated: 2026-08-28
   per-player Proton/shader data binds.
 - Management WebUI for users, libraries, diagnostics, storage, credentials,
   installed-game inventory, and optional MQTT configuration.
+- Disabled-by-default Proton overlay DPI repair with console and per-game
+  policy, active-player-only reconciliation, audit backup, and queued restore.
 - SELinux policy for optional VS Code Remote SSH forwarding, with checks
   exposed through `ludusctl doctor`.
 - Optional Home Assistant MQTT discovery, player selection, status reporting,

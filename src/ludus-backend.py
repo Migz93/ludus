@@ -21,6 +21,7 @@ MQTT_HELPER = "/usr/local/lib/ludus/ludus-mqtt"
 VSCODE_POLICY = "/usr/local/lib/ludus/ludus_vscode_ssh.pp"
 GREETER_DISPLAY_CONFIG = "/etc/ludus/greeter-display.json"
 GAMES_HELPER = "/usr/local/lib/ludus/ludus-games"
+PROTON_DPI_HELPER = "/usr/local/lib/ludus/ludus-proton-dpi"
 READ = {
     "status": ["status"], "doctor": ["doctor"],
     # Read-only structured reporting for the WebUI. Neither command changes
@@ -260,6 +261,19 @@ def test_mqtt():
 
 def dispatch(request):
     operation = request.get("operation")
+    if operation in {"proton_dpi.settings", "proton_dpi.save"}:
+        command = [PROTON_DPI_HELPER, "settings" if operation.endswith("settings") else "save"]
+        argument = request.get("argument")
+        if operation.endswith("save") and not isinstance(argument, dict):
+            raise RuntimeError("invalid Proton DPI request")
+        completed = subprocess.run(
+            command, input=(json.dumps(argument) if operation.endswith("save") else None),
+            text=True, capture_output=True, timeout=30, check=False)
+        if completed.returncode:
+            return {"ok": False, "output": completed.stdout, "error": completed.stderr}
+        try: payload = json.loads(completed.stdout)
+        except ValueError: raise RuntimeError("invalid Proton DPI helper response")
+        return {"ok": True, "settings": payload}
     if operation == "games.list":
         completed = subprocess.run([GAMES_HELPER], text=True, capture_output=True,
                                    timeout=120, check=False)

@@ -531,6 +531,10 @@ select {
 .game-detail-title { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
 .game-detail-title h2 { font-size: 24px; line-height: 1.2; }
 .game-detail-title p { color: var(--text-faint); font-size: 13px; margin-top: 4px; }
+.dpi-status { display: flex; flex-direction: column; gap: 10px; }
+.dpi-status .review { margin: 0; }
+.dpi-status .review-row dd { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.dpi-error { color: var(--err-text); font-size: 12.5px; }
 
 .facts { display: grid; gap: 9px; }
 .fact { display: grid; grid-template-columns: 132px minmax(0, 1fr); gap: 12px; font-size: 13.5px; align-items: baseline; }

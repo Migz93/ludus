@@ -114,6 +114,7 @@ install -m 0755 "$project_dir/src/ludus-steam-register-libraries" "$install_root
 install -m 0755 "$project_dir/src/ludus-steam-user-libraries.py" "$install_root/ludus-steam-user-libraries"
 install -m 0755 "$project_dir/src/ludus-storage.py" "$install_root/ludus-storage"
 install -m 0755 "$project_dir/src/ludus-games.py" "$install_root/ludus-games"
+install -m 0755 "$project_dir/src/ludus-proton-dpi.py" "$install_root/ludus-proton-dpi"
 install -m 0755 "$project_dir/src/ludus-mountd.py" "$install_root/ludus-mountd"
 install -m 0755 "$project_dir/src/ludus-mountctl.py" "$install_root/ludus-mountctl"
 install -m 0755 "$project_dir/src/ludus-backend.py" "$install_root/ludus-backend"
@@ -166,6 +167,7 @@ if ! id ludus-web >/dev/null 2>&1; then
   : > "$config_dir/created-ludus-web-user"
 fi
 install -d -o root -g ludus-web -m 0750 /var/cache/ludus/game-art
+install -d -o root -g root -m 0700 /var/lib/ludus/proton-dpi /var/lib/ludus/proton-dpi/backups
 if [[ ! -e "$config_dir/webui.json" ]] || python3 -c 'import json, sys; sys.exit(json.load(open(sys.argv[1])).get("auth_mode") != "none")' "$config_dir/webui.json"; then
   # PAM service ludus-web authorizes only members of the local wheel group.
   # Upgrade old unauthenticated configurations to that secure default too.
@@ -200,7 +202,7 @@ if config.get("port") != 9304:
 PY
 [[ -e "$config_dir/libraries.conf" ]] || install -m 0644 /dev/null "$config_dir/libraries.conf"
 if [[ ! -e "$config_dir/game-settings.json" ]]; then
-  printf '%s\n' '{"version":1,"global":{},"games":{}}' > "$config_dir/game-settings.json"
+  printf '%s\n' '{"version":1,"global":{"proton_overlay_dpi":null},"games":{}}' > "$config_dir/game-settings.json"
 fi
 chown root:ludus-web "$config_dir/game-settings.json"
 chmod 0640 "$config_dir/game-settings.json"
@@ -271,7 +273,7 @@ systemctl enable --now ludus-mqtt.service
 # before the backend: unlike the backend it does not own /run/ludus, avoiding
 # removal of the backend's live Unix socket.
 systemctl restart ludus-mqtt.service
-systemctl restart ludus-backend.service ludus-web.service ludus-web-firewall.service
+systemctl restart ludus-mount.service ludus-backend.service ludus-web.service ludus-web-firewall.service
 restart_plasmalogin
 install_completed=true
 echo "Backup: $backup"

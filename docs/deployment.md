@@ -53,6 +53,7 @@ system power or lock policy.
 | `/usr/local/lib/ludus` | Ludus executables, greeter, UI files, and policy artefacts |
 | `/etc/ludus` | Configuration, WebUI settings, login-display settings, MQTT settings, library records, the versioned game-settings policy, and install markers |
 | `/var/lib/ludus/backups` | Pre-change login and Steam-autostart backups |
+| `/var/lib/ludus/proton-dpi` | Root-private per-player reconciliation state and first-change whole-file audit backups |
 | `/var/cache/ludus/game-art` | Validated local or official-Steam artwork cached by numeric app ID for the WebUI |
 | `/run/ludus` | WebUI backend socket, MQTT status, and transient requests |
 | `/run/ludus-mount` | Mount control socket and active-session marker |
@@ -64,7 +65,7 @@ systemd and must not be used for durable configuration.
 
 | Unit | Responsibility |
 |---|---|
-| `ludus-mount.service` | Private Steam bind-mount daemon |
+| `ludus-mount.service` | Private Steam bind-mount daemon and active-player pre-Steam Proton DPI reconciliation |
 | `ludus-backend.service` | Privileged WebUI backend socket |
 | `ludus-web.service` | HTTP WebUI frontend |
 | `ludus-web-firewall.service` | Supported-zone firewall rule management |

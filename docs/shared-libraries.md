@@ -61,8 +61,19 @@ private home. Failed lookups are retried after 24 hours rather than on every
 page load.
 
 `/etc/ludus/game-settings.json` is the versioned console-wide policy store for
-later managed game features. The inventory is read-only: this foundation does
-not change the policy, player Steam data, game content or Proton prefixes.
+managed game features. Its optional Proton overlay DPI policy is disabled by
+default and supports 100%, 125%, 150%, 175%, 200%, and 250%, with per-game
+inherit, disabled, or explicit override choices.
+
+After the active player's private `compatdata` mounts are established and
+before Steam starts, Ludus reconciles only an existing numeric app ID path at
+`steamapps/compatdata/<appid>/pfx/user.reg`. It edits only the exact
+`Control Panel\\Desktop` `LogPixels` DWORD, does not create prefixes, and
+reports missing prefixes. A first-change whole-file backup is retained under
+root-private `/var/lib/ludus/proton-dpi`, but restoration changes or removes
+only the originally recorded `LogPixels` value so later unrelated registry
+changes survive. Disabling management queues restoration independently for
+each affected player and completes it on that player's next login.
 
 ## Safety Rules
 

@@ -1550,7 +1550,7 @@ async function viewGames() {
       ? frag(
         el('div', { class: 'game-grid-meta' },
           el('span', { text: `${routable.length} installed ${plural(routable.length, 'app')}` }),
-          totalPages > 1 ? el('span', { text: `Page ${page} of ${totalPages}` }) : null),
+          totalPages > 1 ? gamePagination(page, totalPages) : null),
         el('div', { class: 'poster-grid' }, pageGames.map(game => gamePoster(game))),
         totalPages > 1 ? gamePagination(page, totalPages) : null)
       : empty('steam', 'No installed Steam apps found',
@@ -1591,12 +1591,12 @@ function gamePagination(page, totalPages) {
   const target = number => `#/games/page/${number}`;
   return el('nav', { class: 'pagination', 'aria-label': 'Game pages' },
     page > 1
-      ? el('a', { class: 'btn btn-sm', href: target(page - 1), 'aria-label': 'Previous page' }, icon('chevron'), el('span', { text: 'Previous' }))
-      : el('span', { class: 'btn btn-sm pagination-disabled', 'aria-hidden': 'true' }, icon('chevron'), el('span', { text: 'Previous' })),
+      ? el('a', { class: 'pagination-button', href: target(page - 1), 'aria-label': 'Previous page', title: 'Previous page' }, icon('chevron'))
+      : el('span', { class: 'pagination-button pagination-disabled', 'aria-hidden': 'true' }, icon('chevron')),
     el('span', { class: 'pagination-label', text: `Page ${page} of ${totalPages}` }),
     page < totalPages
-      ? el('a', { class: 'btn btn-sm pagination-next', href: target(page + 1), 'aria-label': 'Next page' }, el('span', { text: 'Next' }), icon('chevron'))
-      : el('span', { class: 'btn btn-sm pagination-next pagination-disabled', 'aria-hidden': 'true' }, el('span', { text: 'Next' }), icon('chevron'))
+      ? el('a', { class: 'pagination-button pagination-next', href: target(page + 1), 'aria-label': 'Next page', title: 'Next page' }, icon('chevron'))
+      : el('span', { class: 'pagination-button pagination-next pagination-disabled', 'aria-hidden': 'true' }, icon('chevron'))
   );
 }
 

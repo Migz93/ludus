@@ -505,9 +505,19 @@ select {
 .poster-state[data-tone="warn"] { color: var(--warn-text); }
 .poster-state[data-tone="err"] { color: var(--err-text); }
 
-.pagination { display: flex; align-items: center; justify-content: center; gap: 14px; }
-.pagination-label { color: var(--text-dim); font-size: 13px; min-width: 92px; text-align: center; }
-.pagination .btn:first-child .icon { transform: rotate(90deg); }
+.pagination { display: flex; align-items: center; justify-content: center; gap: 9px; }
+.pagination-label { color: var(--text-dim); font-size: 13px; min-width: 78px; text-align: center; }
+.pagination-button {
+  display: grid; place-items: center;
+  width: 32px; height: 32px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: var(--text-dim);
+  text-decoration: none;
+}
+.pagination-button:hover { background: var(--surface-3); color: var(--text); border-color: #45525f; }
+.pagination-button .icon { width: 16px; height: 16px; transform: rotate(90deg); }
 .pagination-next .icon { transform: rotate(-90deg); }
 .pagination-disabled { opacity: .38; pointer-events: none; }
 .game-back .icon { transform: rotate(180deg); }

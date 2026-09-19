@@ -13,12 +13,14 @@ conservative and command-driven:
 | Library validation/repair | `ludusctl libraries check|repair` | Checks and restores the managed shared-library layout only |
 | Stale session reconciliation | `ludusctl` and mount daemon | Clears a stale marker and private binds only after the related process has gone |
 | Installer upgrade | `install.sh` | Replaces installed entry points and restarts applicable Ludus services |
+| Proton DPI reconciliation | `ludus-mount.service` | Applies or restores only `LogPixels` in the active player's existing prefixes before Steam |
 
 ## Data Retention
 
 | Data | Retained | Controlled by |
 |---|---|---|
 | Ludus install backups | Yes | `/var/lib/ludus/backups` |
+| Proton DPI audit backups and restoration state | Yes | Root-private `/var/lib/ludus/proton-dpi` |
 | Linux accounts and home data | Yes | Never removed by Ludus uninstall |
 | Shared game files | Yes | Never removed by library removal/uninstall |
 | Steam registrations | Yes | Left intact on uninstall |
@@ -39,5 +41,8 @@ When adding cleanup, repair, or consistency checks:
 
 - Never delete player accounts, home directories, or game data as cleanup.
 - Do not remove recovery backups automatically.
+- Normal uninstall refuses to strand managed Proton DPI values. Forced
+  uninstall is available only as an explicit administrator choice and clearly
+  reports that those values will remain changed.
 - A failed external check is a reason to warn or stop, not to force repair.
 - Keep SELinux enforcing and configuration recovery reversible.

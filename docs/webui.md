@@ -31,6 +31,9 @@ an HTTP endpoint that directly shells out or bypasses the backend's validation.
 - view installed Steam games discovered from managed shared-library manifests;
   malformed and duplicate records are shown without changing them; the poster
   grid uses validated local or official-Steam art from a separate Ludus cache
+- configure the disabled-by-default console-wide Proton overlay DPI repair and
+  per-game inherit/disabled/override policy; game details show each player's
+  latest reconciliation, including missing prefixes and queued restorations
 - inspect Ludus services, mounts, storage, and `ludusctl doctor` results
 - adopt an existing compatible disk without deleting its data; Ludus grants
   the player group traversal-only access at the filesystem root so a later

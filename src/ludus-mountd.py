@@ -53,23 +53,49 @@ def mount_for(user):
     if os.path.exists(ACTIVE_USER):
         with open(ACTIVE_USER, encoding="utf-8") as file:
             active = file.read().strip()
-        if active and active != user:
+        if active:
             if session_live(active):
                 raise RuntimeError(f"another Ludus session is active: {active}")
             # A forced logout can bypass ludus-steam's EXIT trap.  Recover on
             # the next legitimate login rather than leaving the console stuck.
             unmount_for(active)
-    for library in libraries():
-        for name in ("compatdata", "shadercache"):
-            target = os.path.join(library, "steamapps", name)
-            if not os.path.isdir(target):
-                raise RuntimeError(f"missing Ludus private bind target: {target}")
-            if mounted(target):
-                subprocess.run(["umount", target], check=True)
-            subprocess.run(["mount", "--bind", private_dir(user, library, name), target], check=True)
-    with open(ACTIVE_USER, "w", encoding="utf-8") as file:
-        file.write(user + "\n")
-    os.chmod(ACTIVE_USER, 0o600)
+    mounted_targets = []
+    try:
+        for library in libraries():
+            for name in ("compatdata", "shadercache"):
+                target = os.path.join(library, "steamapps", name)
+                if not os.path.isdir(target):
+                    raise RuntimeError(f"missing Ludus private bind target: {target}")
+                if mounted(target):
+                    subprocess.run(["umount", target], check=True)
+                subprocess.run(["mount", "--bind", private_dir(user, library, name), target], check=True)
+                mounted_targets.append(target)
+        with open(ACTIVE_USER, "w", encoding="utf-8") as file:
+            file.write(user + "\n")
+        os.chmod(ACTIVE_USER, 0o600)
+        # Prefix policy is evaluated only after every compatdata bind belongs
+        # to this user, and this request must finish before Steam can start.
+        subprocess.run(["/usr/local/lib/ludus/ludus-proton-dpi", "reconcile", user],
+                       check=True, timeout=120)
+    except Exception:
+        cleanup_errors = []
+        for target in reversed(mounted_targets):
+            try:
+                if mounted(target):
+                    subprocess.run(["umount", target], check=True)
+            except Exception as error:
+                cleanup_errors.append(f"{target}: {error}")
+        if cleanup_errors:
+            # Keep surviving binds attributable to this player so doctor and
+            # the next recovery attempt never treat private data as unclaimed.
+            with open(ACTIVE_USER, "w", encoding="utf-8") as file:
+                file.write(user + "\n")
+            os.chmod(ACTIVE_USER, 0o600)
+            raise RuntimeError("mount setup failed and cleanup was incomplete: "
+                               + "; ".join(cleanup_errors))
+        try: os.unlink(ACTIVE_USER)
+        except FileNotFoundError: pass
+        raise
 
 def unmount_for(user):
     if os.path.exists(ACTIVE_USER):
@@ -155,14 +181,19 @@ def handle(connection):
         # terminate the serial mount daemon after the request was handled.
         pass
 
-os.makedirs(os.path.dirname(SOCKET), mode=0o755, exist_ok=True)
-try: os.unlink(SOCKET)
-except FileNotFoundError: pass
-server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-server.bind(SOCKET)
-os.chown(SOCKET, 0, grp.getgrnam(GROUP).gr_gid)
-os.chmod(SOCKET, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IWGRP)
-server.listen(8)
-while True:
-    connection, _ = server.accept()
-    with connection: handle(connection)
+def main():
+    os.makedirs(os.path.dirname(SOCKET), mode=0o755, exist_ok=True)
+    try: os.unlink(SOCKET)
+    except FileNotFoundError: pass
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    server.bind(SOCKET)
+    os.chown(SOCKET, 0, grp.getgrnam(GROUP).gr_gid)
+    os.chmod(SOCKET, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IWGRP)
+    server.listen(8)
+    while True:
+        connection, _ = server.accept()
+        with connection: handle(connection)
+
+
+if __name__ == "__main__":
+    main()

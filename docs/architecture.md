@@ -89,7 +89,11 @@ controller users out of a separate confirmation screen.
 
 `ludus.desktop`, `ludus-session`, `ludus-overlay`, and `ludus-steam` own the
 selected user's Ludus session. They sequence the splash/overlay, private Steam
-mount setup, library registration, and Big Picture launch.
+mount setup, Proton DPI reconciliation, library registration, and Big Picture
+launch. DPI reconciliation runs in the privileged mount service after the
+selected player's private compatdata binds are active and before Steam starts.
+If that pre-Steam step fails, the service removes the new binds and active-user
+marker before rejecting the session launch.
 
 ### Shared libraries
 
@@ -102,6 +106,10 @@ The management WebUI derives its read-only installed-games inventory from the
 `appmanifest_<appid>.acf` files in those managed libraries. The inventory is
 console-wide because game content is shared; it does not inspect a player's
 private Steam account or require a network service.
+
+The optional console-wide Proton overlay DPI policy is applied to only the
+active player's existing prefixes. Per-game inheritance, disablement and
+overrides do not change the single-active-player model.
 
 ### Management WebUI
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Reconcile Ludus-managed Wine DPI values in the active player's prefixes."""
 import grp
+import hashlib
 import json
 import os
 import pwd
@@ -204,6 +205,40 @@ def installed_apps(libraries):
     return apps
 
 
+def library_identity(library):
+    return hashlib.sha256(os.path.realpath(library).encode()).hexdigest()[:16]
+
+
+def instance_records(app_record):
+    instances = app_record.get("instances") if isinstance(app_record, dict) else None
+    if isinstance(instances, dict):
+        records = list(instances.values())
+        if isinstance(app_record.get("legacy"), dict):
+            records.append(app_record["legacy"])
+        return records
+    return [app_record]
+
+
+def ensure_instances(app_record, app_libraries):
+    """Migrate legacy per-app state when its library identity is unambiguous."""
+    if isinstance(app_record.get("instances"), dict):
+        return app_record["instances"]
+    legacy = dict(app_record)
+    app_record.clear()
+    app_record["instances"] = {}
+    if len(app_libraries) == 1:
+        library = os.path.realpath(app_libraries[0])
+        legacy["library"] = library
+        app_record["instances"][library_identity(library)] = legacy
+    elif legacy.get("managed") or legacy.get("pending_restore"):
+        # Old releases collapsed duplicate prefixes into one record, so there
+        # is no safe way to infer which original value belongs to which file.
+        app_record["legacy"] = legacy
+        app_record["migration_error"] = (
+            "legacy managed state is ambiguous across duplicate libraries")
+    return app_record["instances"]
+
+
 def reconcile_one(user, appid, library, target, record, backup_root=BACKUPS):
     now = int(time.time())
     try:
@@ -217,7 +252,8 @@ def reconcile_one(user, appid, library, target, record, backup_root=BACKUPS):
             return
         _lines, current = parse_logpixels(text)
         if not record.get("original_recorded"):
-            backup = os.path.join(backup_root, user, appid, "user.reg")
+            backup = os.path.join(backup_root, user, appid,
+                                  library_identity(library), "user.reg")
             os.makedirs(os.path.dirname(backup), mode=0o700, exist_ok=True)
             descriptor = os.open(backup, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
             with os.fdopen(descriptor, "wb") as destination:
@@ -254,26 +290,54 @@ def reconcile(user, config_path=CONFIG, state_path=STATE, libraries_path=LIBRARI
     records = state.setdefault("users", {}).setdefault(user, {})
     apps = installed_apps(load_libraries(libraries_path))
     for appid in sorted(set(apps) | set(records), key=int):
-        record = records.setdefault(appid, {})
-        target = effective_dpi(config, appid)
-        if record.get("pending_restore"): target = None
-        if appid not in apps:
-            record.update(status="not-installed", error="", updated=int(time.time()))
+        app_record = records.setdefault(appid, {})
+        app_libraries = apps.get(appid, [])
+        instances = ensure_instances(app_record, app_libraries)
+        if app_record.get("migration_error"):
             continue
-        # Duplicate manifests are reconciled independently without crossing the
-        # active player's mounted compatdata boundary.
-        for library in apps[appid]: reconcile_one(user, appid, library, target, record)
+        active_keys = set()
+        for library in app_libraries:
+            library = os.path.realpath(library)
+            key = library_identity(library)
+            active_keys.add(key)
+            record = instances.setdefault(key, {"library": library})
+            record["library"] = library
+            target = None if record.get("pending_restore") else effective_dpi(config, appid)
+            reconcile_one(user, appid, library, target, record)
+        for key, record in instances.items():
+            if key not in active_keys:
+                record.update(status="not-installed", error="",
+                              updated=int(time.time()))
     atomic_json(state_path, state)
     return state
+
+
+def aggregate_record(app_record):
+    if app_record.get("migration_error"):
+        return {"status": "error", "error": app_record["migration_error"],
+                "pending_restore": True}
+    records = instance_records(app_record)
+    if not records:
+        return {}
+    priority = {"error": 0, "pending-restore": 1, "no-prefix": 2,
+                "not-installed": 3, "pending-apply": 4, "applied": 5,
+                "current": 6, "restored": 7, "disabled": 8}
+    chosen = min(records, key=lambda item: priority.get(item.get("status"), 9))
+    allowed = ("status", "error", "updated", "dpi")
+    result = {key: chosen[key] for key in allowed if key in chosen}
+    result["pending_restore"] = any(record.get("pending_restore") for record in records)
+    errors = sorted({record.get("error", "") for record in records if record.get("error")})
+    if errors: result["error"] = "; ".join(errors)
+    result["instances"] = len(records)
+    return result
 
 
 def public_settings(config_path=CONFIG, state_path=STATE):
     config = load_config(config_path)
     state = read_json(state_path, {"version": 1, "users": {}})
     visible = {}
-    allowed = ("status", "error", "updated", "dpi", "pending_restore")
     for user, records in state.get("users", {}).items():
-        visible[user] = {appid: {key: record[key] for key in allowed if key in record}
+        visible[user] = {appid: aggregate_record(record)
                          for appid, record in records.items()}
     return {"version": 1, "global": config["global"], "games": config["games"],
             "reconciliation": visible}
@@ -297,15 +361,31 @@ def save_policy(argument, config_path=CONFIG, state_path=STATE):
     validate_config(config)
     state = read_json(state_path, {"version": 1, "users": {}})
     for records in state.get("users", {}).values():
-        for appid, record in records.items():
-            if record.get("managed"):
-                if effective_dpi(config, appid) is None:
-                    record["pending_restore"] = True; record["status"] = "pending-restore"
-                elif record.get("pending_restore"):
-                    record["pending_restore"] = False; record["status"] = "pending-apply"
+        for appid, app_record in records.items():
+            for record in instance_records(app_record):
+                if record.get("managed"):
+                    if effective_dpi(config, appid) is None:
+                        record["pending_restore"] = True
+                        record["status"] = "pending-restore"
+                    elif record.get("pending_restore"):
+                        record["pending_restore"] = False
+                        record["status"] = "pending-apply"
     atomic_json(config_path, config, 0o640, grp.getgrnam("ludus-web").gr_gid)
     atomic_json(state_path, state)
     return public_settings(config_path, state_path)
+
+
+def uninstall_blockers(state_path=STATE):
+    state = read_json(state_path, {"version": 1, "users": {}})
+    blockers = []
+    for user, records in state.get("users", {}).items():
+        for appid, app_record in records.items():
+            for record in instance_records(app_record):
+                if record.get("managed") or record.get("pending_restore"):
+                    blockers.append({"user": user, "appid": appid,
+                                     "library": record.get("library", ""),
+                                     "status": record.get("status", "managed")})
+    return blockers
 
 
 def main():
@@ -316,7 +396,11 @@ def main():
     if len(sys.argv) == 2 and sys.argv[1] == "save":
         argument = json.load(sys.stdin)
         print(json.dumps(save_policy(argument), separators=(",", ":"))); return
-    raise SystemExit("usage: ludus-proton-dpi reconcile USER | settings | save")
+    if len(sys.argv) == 2 and sys.argv[1] == "uninstall-check":
+        blockers = uninstall_blockers()
+        print(json.dumps(blockers, separators=(",", ":")))
+        raise SystemExit(2 if blockers else 0)
+    raise SystemExit("usage: ludus-proton-dpi reconcile USER | settings | save | uninstall-check")
 
 
 if __name__ == "__main__": main()

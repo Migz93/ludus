@@ -92,6 +92,8 @@ selected user's Ludus session. They sequence the splash/overlay, private Steam
 mount setup, Proton DPI reconciliation, library registration, and Big Picture
 launch. DPI reconciliation runs in the privileged mount service after the
 selected player's private compatdata binds are active and before Steam starts.
+If that pre-Steam step fails, the service removes the new binds and active-user
+marker before rejecting the session launch.
 
 ### Shared libraries
 

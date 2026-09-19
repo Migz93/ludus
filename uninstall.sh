@@ -1,6 +1,50 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 if (( EUID != 0 )); then echo "Run as root: sudo $0" >&2; exit 1; fi
+force=false
+if (( $# > 1 )); then echo "Usage: sudo $0 [--force]" >&2; exit 2; fi
+case ${1:-} in
+  "") ;;
+  --force) force=true ;;
+  *) echo "Usage: sudo $0 [--force]" >&2; exit 2 ;;
+esac
+
+dpi_helper=/usr/local/lib/ludus/ludus-proton-dpi
+if [[ -x "$dpi_helper" ]]; then
+  set +e
+  dpi_blockers=$("$dpi_helper" uninstall-check)
+  dpi_status=$?
+  set -e
+  if (( dpi_status == 2 )); then
+    echo "Some games still have Ludus-managed Proton DPI settings applied:" >&2
+    python3 -c '
+import json, sys
+for item in json.load(sys.stdin):
+    location = " in {}".format(item["library"]) if item.get("library") else ""
+    print("  - player {}, Steam app {}{}".format(item["user"], item["appid"], location), file=sys.stderr)
+' <<<"$dpi_blockers"
+    echo "Recommended: disable those settings in the WebUI, then have each listed player log in and out once so Ludus can restore their original values." >&2
+    if [[ "$force" != true ]]; then
+      echo "Uninstall stopped. After restoration, rerun this command; or use --force to uninstall while leaving those DPI values changed." >&2
+      exit 1
+    fi
+    echo "Warning: --force selected; uninstalling without restoring the listed Proton DPI values." >&2
+  elif (( dpi_status != 0 )); then
+    echo "Could not verify whether managed Proton DPI values remain." >&2
+    if [[ "$force" != true ]]; then
+      echo "Uninstall stopped. Resolve the check failure or use --force to continue." >&2
+      exit 1
+    fi
+    echo "Warning: --force selected; continuing without a successful Proton DPI check." >&2
+  fi
+elif [[ -e /var/lib/ludus/proton-dpi/state.json ]]; then
+  echo "Proton DPI recovery state exists, but the installed safety helper is unavailable." >&2
+  if [[ "$force" != true ]]; then
+    echo "Uninstall stopped. Repair the Ludus installation and restore managed values, or use --force to continue without checking them." >&2
+    exit 1
+  fi
+  echo "Warning: --force selected; continuing without checking the retained Proton DPI state." >&2
+fi
 if pgrep -x steam >/dev/null 2>&1 || pgrep -x steamwebhelper >/dev/null 2>&1; then
   echo "Steam is still running. Sign out of Ludus and close Steam before uninstalling." >&2
   exit 1

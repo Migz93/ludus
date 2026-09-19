@@ -73,7 +73,9 @@ reports missing prefixes. A first-change whole-file backup is retained under
 root-private `/var/lib/ludus/proton-dpi`, but restoration changes or removes
 only the originally recorded `LogPixels` value so later unrelated registry
 changes survive. Disabling management queues restoration independently for
-each affected player and completes it on that player's next login.
+each affected player and completes it on that player's next login. Recovery
+state and backups are separate for every player, app ID, and managed library,
+so duplicate installations cannot exchange original registry values.
 
 ## Safety Rules
 

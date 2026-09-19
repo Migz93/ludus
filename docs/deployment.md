@@ -92,6 +92,12 @@ sudo ./uninstall.sh
 sudo systemctl restart plasmalogin
 ```
 
+If any player prefixes still contain a Ludus-managed Proton DPI value, removal
+stops and lists the affected player and app IDs. Disable those settings and let
+each listed player complete one login/logout cycle before retrying. An
+administrator may deliberately bypass this protection with
+`sudo ./uninstall.sh --force`; the listed registry values are then left as-is.
+
 Removal restores Ludus-managed login configuration and removes Ludus config,
 but intentionally leaves the `ludus` group, Linux accounts, game data, Steam
 library registrations, timestamped backups, and rpm-ostree build dependencies

@@ -177,7 +177,8 @@ class ReconcileOneTests(unittest.TestCase):
             self.assertEqual(record["status"], "applied")
             self.assertFalse(record["original_present"])
             self.assertEqual(stat.S_IMODE(reg.stat().st_mode), 0o640)
-            self.assertEqual((backup / "alice" / "10" / "user.reg").read_text(), original)
+            backup_file = backup / "alice" / "10" / DPI.library_identity(str(library)) / "user.reg"
+            self.assertEqual(backup_file.read_text(), original)
             DPI.reconcile_one("alice", "10", str(library), 200, record, str(backup))
             self.assertEqual(record["status"], "current")
             self.assertEqual(reg.stat().st_mtime_ns, first_mtime)
@@ -204,6 +205,51 @@ class ReconcileOneTests(unittest.TestCase):
                               str(pathlib.Path(root) / "backups"))
             self.assertIn('"LogPixels"=dword:00000078',
                           reg.read_text(encoding="utf-8"))
+
+    def test_duplicate_libraries_keep_independent_original_values(self):
+        with tempfile.TemporaryDirectory() as root:
+            backup = pathlib.Path(root) / "backups"
+            records, registries = [], []
+            for name, value in (("first", "00000078"), ("second", "00000090")):
+                library = pathlib.Path(root) / name
+                pfx = library / "steamapps" / "compatdata" / "10" / "pfx"
+                pfx.mkdir(parents=True)
+                reg = pfx / "user.reg"
+                reg.write_text(HEADER + DESKTOP + f'"LogPixels"=dword:{value}\n',
+                               encoding="utf-8")
+                record = {"library": str(library)}
+                DPI.reconcile_one("alice", "10", str(library), 200, record,
+                                  str(backup))
+                records.append((library, record)); registries.append((reg, value))
+            for library, record in records:
+                DPI.reconcile_one("alice", "10", str(library), None, record,
+                                  str(backup))
+            for reg, value in registries:
+                self.assertIn(f'"LogPixels"=dword:{value}',
+                              reg.read_text(encoding="utf-8"))
+            self.assertNotEqual(records[0][1]["backup"], records[1][1]["backup"])
+
+
+class StateTests(unittest.TestCase):
+    def test_legacy_single_library_state_migrates(self):
+        record = {"managed": True, "original_recorded": True,
+                  "original_present": False, "backup": "/old/backup"}
+        instances = DPI.ensure_instances(record, ["/games/library"])
+        self.assertEqual(len(instances), 1)
+        migrated = next(iter(instances.values()))
+        self.assertTrue(migrated["managed"])
+        self.assertEqual(migrated["backup"], "/old/backup")
+
+    def test_uninstall_blockers_include_each_managed_instance(self):
+        with tempfile.TemporaryDirectory() as root:
+            state_path = pathlib.Path(root) / "state.json"
+            state = {"version": 1, "users": {"alice": {"10": {"instances": {
+                    "one": {"library": "/one", "managed": True, "status": "current"},
+                    "two": {"library": "/two", "managed": True, "status": "applied"}
+            }}}}}
+            state_path.write_text(json.dumps(state), encoding="utf-8")
+            blockers = DPI.uninstall_blockers(str(state_path))
+            self.assertEqual({item["library"] for item in blockers}, {"/one", "/two"})
 
 
 if __name__ == "__main__":

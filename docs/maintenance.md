@@ -41,5 +41,8 @@ When adding cleanup, repair, or consistency checks:
 
 - Never delete player accounts, home directories, or game data as cleanup.
 - Do not remove recovery backups automatically.
+- Normal uninstall refuses to strand managed Proton DPI values. Forced
+  uninstall is available only as an explicit administrator choice and clearly
+  reports that those values will remain changed.
 - A failed external check is a reason to warn or stop, not to force repair.
 - Keep SELinux enforcing and configuration recovery reversible.

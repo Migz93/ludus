@@ -114,6 +114,8 @@ install -m 0755 "$project_dir/src/ludus-steam-register-libraries" "$install_root
 install -m 0755 "$project_dir/src/ludus-steam-user-libraries.py" "$install_root/ludus-steam-user-libraries"
 install -m 0755 "$project_dir/src/ludus-storage.py" "$install_root/ludus-storage"
 install -m 0755 "$project_dir/src/ludus-games.py" "$install_root/ludus-games"
+install -m 0755 "$project_dir/src/ludus-launch-options.py" "$install_root/ludus-launch-options"
+install -d -o root -g root -m 0700 /var/lib/ludus/launch-options
 install -m 0755 "$project_dir/src/ludus-proton-dpi.py" "$install_root/ludus-proton-dpi"
 install -m 0755 "$project_dir/src/ludus-mountd.py" "$install_root/ludus-mountd"
 install -m 0755 "$project_dir/src/ludus-mountctl.py" "$install_root/ludus-mountctl"

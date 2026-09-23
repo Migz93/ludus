@@ -54,6 +54,8 @@ system power or lock policy.
 | `/etc/ludus` | Configuration, WebUI settings, login-display settings, MQTT settings, library records, the versioned game-settings policy, and install markers |
 | `/var/lib/ludus/backups` | Pre-change login and Steam-autostart backups |
 | `/var/lib/ludus/proton-dpi` | Root-private per-player reconciliation state and first-change whole-file audit backups |
+| `/var/lib/ludus/launch-options` | Root-private list of players with possible launch-options recovery state, retained on removal |
+| `~/.local/state/ludus/launch-options` | Player-private launch-options originals, write journal, and accepted overrides (directory 0700, state 0600), retained on removal |
 | `/var/cache/ludus/game-art` | Validated local or official-Steam artwork cached by numeric app ID for the WebUI |
 | `/run/ludus` | WebUI backend socket, MQTT status, and transient requests |
 | `/run/ludus-mount` | Mount control socket and active-session marker |
@@ -65,7 +67,7 @@ systemd and must not be used for durable configuration.
 
 | Unit | Responsibility |
 |---|---|
-| `ludus-mount.service` | Private Steam bind-mount daemon and active-player pre-Steam Proton DPI reconciliation |
+| `ludus-mount.service` | Private Steam bind-mount daemon and active-player pre-Steam Proton DPI and unprivileged launch-options reconciliation |
 | `ludus-backend.service` | Privileged WebUI backend socket |
 | `ludus-web.service` | HTTP WebUI frontend |
 | `ludus-web-firewall.service` | Supported-zone firewall rule management |
@@ -97,6 +99,17 @@ stops and lists the affected player and app IDs. Disable those settings and let
 each listed player complete one login/logout cycle before retrying. An
 administrator may deliberately bypass this protection with
 `sudo ./uninstall.sh --force`; the listed registry values are then left as-is.
+
+Managed Steam launch options have a similar uninstall check. Use **Remove all
+launch management** on the Games page and allow each affected player to log in
+and out. Manual conflicts must be resolved or explicitly accepted. `--force`
+leaves the current launch options in place and retains recovery records. Players
+previously reconciled remain included in the check even after unenrolment;
+re-enrol them to complete queued restoration, or deliberately use `--force`.
+Reinstallation uses the retained records for subsequent recovery. ScopeBuddy
+must already be installed for its preset; Ludus does not install it. No new PAM,
+firewall, systemd unit, or SELinux policy is introduced by launch management.
+The shared game policy is serialized using `/etc/ludus/game-settings.lock`.
 
 Removal restores Ludus-managed login configuration and removes Ludus config,
 but intentionally leaves the `ludus` group, Linux accounts, game data, Steam

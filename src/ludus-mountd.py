@@ -77,6 +77,11 @@ def mount_for(user):
         # to this user, and this request must finish before Steam can start.
         subprocess.run(["/usr/local/lib/ludus/ludus-proton-dpi", "reconcile", user],
                        check=True, timeout=120)
+        # The helper drops privileges before touching private Steam files. A
+        # skipped or conflicted game is reported in the WebUI and never blocks
+        # the remaining games or changes authentication/session behaviour.
+        subprocess.run(["/usr/local/lib/ludus/ludus-launch-options", "reconcile", user],
+                       check=True, timeout=120)
     except Exception:
         cleanup_errors = []
         for target in reversed(mounted_targets):

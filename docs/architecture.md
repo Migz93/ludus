@@ -89,11 +89,18 @@ controller users out of a separate confirmation screen.
 
 `ludus.desktop`, `ludus-session`, `ludus-overlay`, and `ludus-steam` own the
 selected user's Ludus session. They sequence the splash/overlay, private Steam
-mount setup, Proton DPI reconciliation, library registration, and Big Picture
+mount setup, Proton DPI and launch-options reconciliation, library registration, and Big Picture
 launch. DPI reconciliation runs in the privileged mount service after the
 selected player's private compatdata binds are active and before Steam starts.
 If that pre-Steam step fails, the service removes the new binds and active-user
 marker before rejecting the session launch.
+
+The mount service also invokes the launch-options coordinator. It passes saved
+policy to a subprocess after dropping to the active player's UID, primary GID,
+and supplementary groups. That worker owns all private Steam-file and recovery
+state reads/writes; the root coordinator owns only the console policy and a
+list of players who may require recovery. Per-game conflicts are reported
+without changing the Steam value. The normal first-Steam-login flow is unchanged.
 
 ### Shared libraries
 

@@ -13,10 +13,11 @@ MAX_HTTP_WORKERS = 16
 HTTP_SOCKET_TIMEOUT = 15
 BACKEND_OPERATION_TIMEOUT = 3610
 PAM_RETRY_INTERVAL = 2
-PAM_SUCCESS_TTL = 300
+PAM_SUCCESS_TTL = 15 * 60
 PAM_FAILURES = {}
 PAM_SUCCESSES = {}
 PAM_FAILURES_LOCK = threading.Lock()
+PAM_IN_FLIGHT = {}
 
 def allow_pam_attempt(address):
     """Limit expensive root-side PAM checks from any one LAN peer."""
@@ -49,9 +50,41 @@ def recent_pam_success(address, authorization):
     with PAM_FAILURES_LOCK:
         expiry = PAM_SUCCESSES.get((address, fingerprint), 0)
         if expiry > now:
+            # Idle expiry: an active administrator is not asked again.
+            PAM_SUCCESSES[(address, fingerprint)] = now + PAM_SUCCESS_TTL
             return True
         PAM_SUCCESSES.pop((address, fingerprint), None)
         return False
+
+def pam_check(address, authorization, username, password):
+    """Run one root-side PAM check per credential; parallel requests share it.
+
+    Without this, requests sent alongside the first one after the remembered
+    sign-in expires would hit the retry interval and be refused.
+    """
+    key = (address, hashlib.sha256(authorization.encode()).digest())
+    with PAM_FAILURES_LOCK:
+        pending = PAM_IN_FLIGHT.get(key)
+        if pending is None:
+            pending = PAM_IN_FLIGHT[key] = {"done": threading.Event(), "ok": False}
+            owner = True
+        else:
+            owner = False
+    if not owner:
+        pending["done"].wait(20)
+        return pending["ok"]
+    try:
+        if not allow_pam_attempt(address): return False
+        try:
+            pending["ok"] = call("webui.pam_auth", {"username": username, "password": password}).get("ok", False)
+        except (OSError, ValueError):
+            pending["ok"] = False
+        if pending["ok"]: remember_pam_success(address, authorization)
+        return pending["ok"]
+    finally:
+        with PAM_FAILURES_LOCK:
+            PAM_IN_FLIGHT.pop(key, None)
+        pending["done"].set()
 
 def remember_pam_success(address, authorization):
     fingerprint = hashlib.sha256(authorization.encode()).digest()
@@ -108,12 +141,7 @@ class Handler(BaseHTTPRequestHandler):
         if mode == "pam+local" and local: return True
         if mode in ("pam", "pam+local"):
             if recent_pam_success(self.client_address[0], auth): return True
-            if not allow_pam_attempt(self.client_address[0]): return False
-            try:
-                result = call("webui.pam_auth", {"username": username, "password": password}).get("ok", False)
-                if result: remember_pam_success(self.client_address[0], auth)
-                return result
-            except (OSError, ValueError): return False
+            return pam_check(self.client_address[0], auth, username, password)
         return False
     def send(self, response, code=200, content_type="application/json", extra=()):
         body = response.encode() if isinstance(response, str) else json.dumps(response).encode()
@@ -157,7 +185,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(401); self.send_header("WWW-Authenticate", 'Basic realm="Ludus"'); self.send_header("Cache-Control", "no-store"); self.end_headers(); return False
     def do_GET(self):
         if not self.require_auth(): return
-        routes = {"/api/status":"status", "/api/doctor":"doctor", "/api/checks":"doctor.json", "/api/storage":"storage", "/api/users":"users.list", "/api/users/personal-libraries":"users.personal_libraries", "/api/libraries":"libraries.list", "/api/libraries/default":"libraries.default", "/api/libraries/candidates":"libraries.candidates", "/api/libraries/check":"libraries.check", "/api/games":"games.list", "/api/games/proton-dpi":"proton_dpi.settings", "/api/disks":"disks.list", "/api/settings":"webui.settings", "/api/greeter-display":"greeter.display.settings", "/api/mqtt":"mqtt.settings"}
+        routes = {"/api/status":"status", "/api/doctor":"doctor", "/api/checks":"doctor.json", "/api/storage":"storage", "/api/users":"users.list", "/api/users/personal-libraries":"users.personal_libraries", "/api/libraries":"libraries.list", "/api/libraries/default":"libraries.default", "/api/libraries/candidates":"libraries.candidates", "/api/libraries/check":"libraries.check", "/api/games":"games.list", "/api/games/proton-dpi":"proton_dpi.settings", "/api/games/launch-options":"launch_options.settings", "/api/disks":"disks.list", "/api/settings":"webui.settings", "/api/greeter-display":"greeter.display.settings", "/api/mqtt":"mqtt.settings"}
         poster = re.fullmatch(r"/api/games/([0-9]+)/poster", self.path)
         if self.path in ("/", "/index.html"): self.send_page()
         elif self.path in routes: self.send(call(routes[self.path]))
@@ -170,7 +198,7 @@ class Handler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", "-1")); assert 0 < length <= MAX_BODY
             body = json.loads(self.rfile.read(length)); assert isinstance(body, dict)
         except (ValueError, json.JSONDecodeError, AssertionError): self.send({"ok":False,"error":"invalid JSON request"},400); return
-        routes = {"/api/users/enroll":("users.enroll","user"),"/api/users/remove":("users.remove","user"),"/api/users/personal-libraries/remove":("users.remove_personal_library",None),"/api/libraries/add":("libraries.add","path"),"/api/libraries/add-default":("libraries.add_default","mount"),"/api/libraries/remove":("libraries.remove","path"),"/api/libraries/default":("libraries.set_default","path"),"/api/libraries/label":("libraries.label",None),"/api/games/proton-dpi":("proton_dpi.save",None),"/api/disks/mount":("disks.mount","path"),"/api/repair":("repair",None),"/api/credentials":("webui.rotate",None),"/api/settings/auth-mode":("webui.set_auth_mode","mode"),"/api/settings/vscode-forwarding":("webui.set_vscode_forwarding","enabled"),"/api/settings/vscode-forwarding/repair":("webui.repair_vscode_forwarding",None),"/api/greeter-display":("greeter.display.save",None),"/api/mqtt":("mqtt.save",None),"/api/mqtt/test":("mqtt.test",None)}
+        routes = {"/api/users/enroll":("users.enroll","user"),"/api/users/remove":("users.remove","user"),"/api/users/personal-libraries/remove":("users.remove_personal_library",None),"/api/libraries/add":("libraries.add","path"),"/api/libraries/add-default":("libraries.add_default","mount"),"/api/libraries/remove":("libraries.remove","path"),"/api/libraries/default":("libraries.set_default","path"),"/api/libraries/label":("libraries.label",None),"/api/games/proton-dpi":("proton_dpi.save",None),"/api/games/launch-options":("launch_options.save",None),"/api/disks/mount":("disks.mount","path"),"/api/repair":("repair",None),"/api/credentials":("webui.rotate",None),"/api/settings/auth-mode":("webui.set_auth_mode","mode"),"/api/settings/vscode-forwarding":("webui.set_vscode_forwarding","enabled"),"/api/settings/vscode-forwarding/repair":("webui.repair_vscode_forwarding",None),"/api/greeter-display":("greeter.display.save",None),"/api/mqtt":("mqtt.save",None),"/api/mqtt/test":("mqtt.test",None)}
         route = routes.get(self.path)
         if not route: self.send({"ok":False,"error":"not found"},404); return
         operation, field = route; self.send(call(operation, body if operation in {"disks.mount", "libraries.label"} or field is None else body.get(field)))

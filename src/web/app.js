@@ -360,6 +360,7 @@ const load = {
     }
     return payload.games;
   }),
+  launchOptions: () => cached('launch-options', async () => (requireOk(await api('/api/games/launch-options'), 'Launch options could not be read.')).settings),
   protonDpi: () => cached('proton-dpi', async () => {
     const result = requireOk(await api('/api/games/proton-dpi'), 'The Proton overlay DPI settings could not be read.');
     return result.settings;
@@ -1542,7 +1543,7 @@ const DPI_VALUES = [100, 125, 150, 175, 200, 250];
 function dpiOptions(includeGameModes, selected) {
   const options = [];
   if (includeGameModes) {
-    options.push(el('option', { value: 'inherit', text: 'Inherit console default' }));
+    options.push(el('option', { value: 'inherit', text: 'Follow default' }));
     options.push(el('option', { value: 'disabled', text: 'Disabled for this game' }));
   } else {
     options.push(el('option', { value: 'disabled', text: 'Disabled' }));
@@ -1560,8 +1561,207 @@ function dpiInfo() {
     el('span', { class: 'info-tip-text', role: 'tooltip', text: message }));
 }
 
+const LAUNCH_PROFILES = [
+  ['adaptive', 'Adaptive native'],
+  ['upscale-720p', 'Upscale from 720p'],
+  ['upscale-1080p', 'Upscale from 1080p'],
+  ['upscale-1440p', 'Upscale from 1440p'],
+  ['custom', 'Custom']
+];
+const UPSCALE_SIZES = { 'upscale-720p': [1280, 720], 'upscale-1080p': [1920, 1080], 'upscale-1440p': [2560, 1440] };
+
+/* Mirrors scopebuddy_arguments() in ludus-launch-options for the live preview. */
+function scopebuddyWrapper(policy) {
+  if (policy.profile === 'custom') return ['scb', policy.wrapper_args, '--'].filter(Boolean).join(' ');
+  const gamescope = ['-f'];
+  if (UPSCALE_SIZES[policy.profile]) {
+    const [width, height] = UPSCALE_SIZES[policy.profile];
+    gamescope.push('-w', width, '-h', height, '-F', policy.upscale_filter || 'nis');
+    if (policy.sharpness !== null && policy.sharpness !== undefined) gamescope.push('--sharpness', policy.sharpness);
+  }
+  return ['SCB_AUTO_RES=1 SCB_AUTO_HDR=1 SCB_AUTO_VRR=1 scb', ...gamescope, '--'].join(' ');
+}
+
+function globalLaunchPolicy(settings) {
+  const saved = settings.global;
+  // Policies saved before profiles existed used free-text arguments only.
+  return Object.assign({}, saved, { profile: saved.profile || (saved.wrapper_args ? 'custom' : 'adaptive') });
+}
+
+function launchOptionsCard(settings, appid) {
+  const base = globalLaunchPolicy(settings);
+  const saved = appid ? (settings.games[appid] || {}) : base;
+  const mode = appid
+    ? el('select', { 'aria-label': 'Game ScopeBuddy policy' },
+      ['inherit', 'enabled', 'disabled'].map(value => el('option', {
+        value, selected: value === (saved.mode || 'inherit'),
+        text: { inherit: 'Follow default', enabled: 'Enable ScopeBuddy', disabled: 'Disable launch management for this game' }[value]
+      })))
+    : el('input', { type: 'checkbox', checked: saved.scopebuddy, 'aria-label': 'Enable ScopeBuddy globally' });
+  const baseName = (LAUNCH_PROFILES.find(([value]) => value === base.profile) || [])[1] || 'Adaptive native';
+  const profileChoices = [...(appid ? [['default', `Console default (${baseName})`]] : []), ...LAUNCH_PROFILES];
+  const savedProfile = saved.profile || (appid ? 'default' : 'adaptive');
+  const profile = el('select', { 'aria-label': 'ScopeBuddy profile' },
+    profileChoices.map(([value, text]) => el('option', { value, text, selected: value === savedProfile })));
+  const filter = el('select', { 'aria-label': 'Upscaling filter' },
+    [['nis', 'NVIDIA Image Scaling (NIS)'], ['fsr', 'AMD FSR 1.0']].map(([value, text]) =>
+      el('option', { value, text, selected: value === (saved.upscale_filter || 'nis') })));
+  const sharpness = el('select', { 'aria-label': 'Upscaling sharpness' },
+    el('option', { value: '', text: 'Gamescope default', selected: saved.sharpness === null || saved.sharpness === undefined }),
+    Array.from({ length: 21 }, (_, value) => el('option', {
+      value, selected: saved.sharpness === value,
+      text: value === 0 ? '0 (sharpest)' : value === 20 ? '20 (softest)' : String(value)
+    })));
+  const wrapper = el('input', { type: 'text', value: saved.wrapper_args || '', maxlength: '2048',
+    'aria-label': 'ScopeBuddy Arguments', placeholder: 'For example: -f -W 3840 -H 2160' });
+  const gameArgs = el('input', { type: 'text', value: saved.game_args || '', maxlength: '2048',
+    'aria-label': 'Game Arguments', placeholder: 'For example: -novid' });
+  const profileField = el('label', null, 'Profile', profile);
+  const filterField = el('label', null, 'Upscaling filter', filter);
+  const sharpnessField = el('label', null, 'Sharpness', sharpness);
+  const wrapperField = el('label', null, 'ScopeBuddy Arguments', wrapper);
+  const gameArgsField = el('label', null, 'Game Arguments', gameArgs);
+  const globalUpscale = notice('warn', 'Fixed render resolution',
+    'Upscale profiles always render at the chosen resolution. On a smaller display or stream, Gamescope downscales instead, so these profiles usually suit individual games better than the console default.');
+  const preview = el('code', { class: 'path' });
+  function current() {
+    const own = { profile: profile.value, upscale_filter: filter.value,
+      sharpness: sharpness.value === '' ? null : Number(sharpness.value), wrapper_args: wrapper.value };
+    return own.profile === 'default' ? base : own;
+  }
+  function refreshPreview() {
+    const overriding = !appid || mode.value === 'enabled';
+    const shown = appid ? overriding : mode.checked;
+    if (appid && mode.value === 'inherit') {
+      wrapper.value = '';
+      gameArgs.value = '';
+    }
+    const chosen = current();
+    profileField.hidden = gameArgsField.hidden = !shown;
+    filterField.hidden = sharpnessField.hidden = !shown || profile.value === 'default' || !UPSCALE_SIZES[profile.value];
+    wrapperField.hidden = !shown || profile.value !== 'custom';
+    globalUpscale.hidden = Boolean(appid) || !shown || !UPSCALE_SIZES[profile.value];
+    const scoped = appid ? mode.value === 'enabled' || (mode.value === 'inherit' && base.scopebuddy) : mode.checked;
+    const policy = appid && mode.value === 'inherit' ? base : chosen;
+    const argsText = [appid ? base.game_args : '', overriding ? gameArgs.value : ''].filter(Boolean).join(' ');
+    preview.textContent = appid && mode.value === 'disabled' ? 'Original launch options (restoration queued)' :
+      [scoped ? scopebuddyWrapper(policy) : '', '%command%', argsText].filter(Boolean).join(' ');
+  }
+  [mode, profile, filter, sharpness, wrapper, gameArgs].forEach(input => {
+    input.addEventListener('input', refreshPreview);
+    input.addEventListener('change', refreshPreview);
+  });
+  refreshPreview();
+  const change = (button, body, success) => mutate(button, {
+    path: '/api/games/launch-options', body, success,
+    detail: 'Steam changes are applied at the affected player’s next Ludus login.',
+    failure: 'Launch options could not be updated'
+  });
+  const save = el('button', { class: 'btn btn-primary', type: 'button', text: 'Save launch options' });
+  save.addEventListener('click', () => {
+    const own = { profile: profile.value, upscale_filter: filter.value,
+      sharpness: sharpness.value === '' ? null : Number(sharpness.value),
+      wrapper_args: profile.value === 'custom' ? wrapper.value : '', game_args: gameArgs.value };
+    change(save, {
+      scope: appid ? 'game' : 'global', appid,
+      policy: appid ? (mode.value === 'enabled' ? Object.assign({ mode: mode.value }, own) : { mode: mode.value })
+        : Object.assign({ scopebuddy: mode.checked }, own)
+    }, 'Launch options saved');
+  });
+  const reset = el('button', { class: 'btn', type: 'button',
+    text: appid ? 'Remove management for this game' : 'Remove all launch management' });
+  reset.addEventListener('click', () => change(reset, appid
+    ? { scope: 'game', appid, policy: { mode: 'disabled' } } : { scope: 'reset' }, 'Restoration queued'));
+  return card(
+    cardHead('Steam launch options'),
+    !settings.available ? notice('warn', 'ScopeBuddy is unavailable', `Missing: ${(settings.missing || ['scb']).join(', ')}. ScopeBuddy needs Gamescope, and kscreen-doctor and jq for KDE display detection. Availability is checked again for each player at login.`) : null,
+    el('div', { class: 'launch-settings' },
+      el('label', { class: appid ? 'launch-policy' : 'launch-toggle' },
+        el('span', { text: appid ? 'ScopeBuddy policy' : 'Enable ScopeBuddy globally' }), mode),
+      profileField, filterField, sharpnessField, wrapperField, gameArgsField),
+    globalUpscale,
+    el('div', { class: 'launch-preview' },
+      el('span', { class: 'help', text: 'Game launch command' }),
+      el('pre', null, preview)),
+    el('div', { class: 'actions' }, save, reset)
+  );
+}
+
+/* One at-a-glance state per player and feature. Detail such as commands and
+   timestamps stays in the recovery records; only actionable states get a button. */
+function applicationStatus(label, state, action) {
+  const [tone, text, detail] = state;
+  return el('div', { class: 'application-status' },
+    el('span', { text: label }),
+    el('span', { class: 'application-status-value', title: detail || null },
+      badge(tone, text), action || null));
+}
+
+function dpiApplicationState(record, target) {
+  const status = record && record.status;
+  if (record && (record.pending_restore || status === 'pending-restore')) return ['warn', 'Pending restore'];
+  if (status === 'error') return ['err', 'Error', record.error];
+  if (target) {
+    if (['applied', 'current'].includes(status) && record.dpi === target) return ['ok', 'Applied'];
+    if (status === 'not-installed') return [null, 'Not installed'];
+    return ['warn', 'Pending apply'];
+  }
+  return status === 'restored' ? [null, 'Restored'] : [null, 'Not managed'];
+}
+
+function launchApplicationState(record, applies) {
+  const status = record && record.status;
+  if (record && (record.accepted || status === 'manual-override')) return [null, 'Manual override'];
+  if (status === 'conflict') return ['err', 'Conflict', record.error || 'Steam launch options were changed outside Ludus.'];
+  if (status === 'error') return ['err', 'Error', record.error];
+  if (status === 'unavailable') return ['warn', 'Unavailable', record.error];
+  if (status === 'pending-restore') return ['warn', 'Pending restore'];
+  if (applies) {
+    if (status === 'applied') return ['ok', 'Applied'];
+    if (status === 'not-installed') return [null, 'Not installed'];
+    return ['warn', 'Pending apply'];
+  }
+  return status === 'restored' ? [null, 'Restored'] : [null, 'Not managed'];
+}
+
+function playerApplicationCard(dpi, launch, appid, players = []) {
+  const users = [...new Set([
+    ...players.filter(player => player.enrolled).map(player => player.user),
+    ...Object.keys(dpi.reconciliation || {}), ...Object.keys(launch.users || {})
+  ])];
+  const dpiPolicy = (dpi.games[appid] || {}).proton_overlay_dpi || 'inherit';
+  const dpiTarget = dpiPolicy === 'inherit' ? dpi.global.proton_overlay_dpi : dpiPolicy === 'disabled' ? null : dpiPolicy;
+  const launchMode = (launch.games[appid] || {}).mode || 'inherit';
+  const launchApplies = launchMode !== 'disabled' && (launchMode === 'enabled' || launch.global.scopebuddy || !!launch.global.game_args);
+  const rows = users.map(user => {
+    const state = (launch.users || {})[user] || { accounts: {} };
+    const accounts = Object.entries(state.accounts || {}).filter(([, records]) => records[appid]);
+    const [account, record] = accounts.length ? [accounts[0][0], accounts[0][1][appid]] : [null, null];
+    const button = (scope, text, success) => {
+      const node = el('button', { class: 'btn btn-sm', type: 'button', text });
+      node.addEventListener('click', () => mutate(node, {
+        path: '/api/games/launch-options', body: { scope, user, account, appid }, success,
+        failure: 'Launch options could not be updated'
+      }));
+      return node;
+    };
+    let action = null;
+    if (record && record.accepted) action = button('resume', 'Resume management', 'Management will resume at next login');
+    else if (record && record.status === 'conflict') action = [
+      button('replace', 'Replace temporarily', 'Replacement queued; the current value is restored when management is removed'),
+      button('accept', 'Accept manual override', 'Manual override accepted')];
+    const launchState = state.error ? ['err', 'Error', state.error] : launchApplicationState(record, launchApplies);
+    return el('div', { class: 'application-player' },
+      el('strong', { text: displayName(user) }),
+      applicationStatus('Proton overlay DPI', dpiApplicationState(((dpi.reconciliation || {})[user] || {})[appid], dpiTarget)),
+      applicationStatus('Steam launch options', launchState, action));
+  });
+  return card(cardHead('Player application'),
+    rows.length ? rows : el('p', { class: 'help', text: 'No players are enrolled.' }));
+}
+
 async function viewGames() {
-  const [games, dpi] = await Promise.all([load.games(), load.protonDpi()]);
+  const [games, dpi, launch] = await Promise.all([load.games(), load.protonDpi(), load.launchOptions()]);
   const routable = games.filter(game => game.appid && !game.component);
   const errors = games.filter(game => game.status === 'error');
   const totalPages = Math.max(1, Math.ceil(routable.length / GAME_PAGE_SIZE));
@@ -1570,6 +1770,7 @@ async function viewGames() {
   const pageGames = routable.slice((page - 1) * GAME_PAGE_SIZE, page * GAME_PAGE_SIZE);
 
   return frag(
+    disclosure('Global Settings', frag(
     card(
       (() => {
         const select = el('select', { 'aria-label': 'Console-wide Proton overlay DPI' },
@@ -1587,6 +1788,8 @@ async function viewGames() {
           select);
       })()
     ),
+    launchOptionsCard(launch)
+    ), 'card-disclosure global-settings'),
     errors.length ? notice('warn', 'Some Steam records could not be read',
       `${errors.length} ${plural(errors.length, 'manifest needs', 'manifests need')} attention. Each problem is shown below without hiding the other games.`) : null,
     routable.length
@@ -1644,8 +1847,8 @@ function gamePagination(page, totalPages) {
 }
 
 async function viewGame() {
-  const [games, libraries, dpi] = await Promise.all([
-    load.games(), load.libraries(), load.protonDpi()
+  const [games, libraries, dpi, launch, players] = await Promise.all([
+    load.games(), load.libraries(), load.protonDpi(), load.launchOptions(), load.users()
   ]);
   const appid = state.routeContext && state.routeContext.appid;
   const game = games.find(item => item.appid === appid);
@@ -1665,8 +1868,6 @@ async function viewGame() {
   const savedPolicy = (dpi.games[appid] && dpi.games[appid].proton_overlay_dpi) || 'inherit';
   const effective = savedPolicy === 'inherit' ? dpi.global.proton_overlay_dpi
     : (savedPolicy === 'disabled' ? null : savedPolicy);
-  const playerStates = Object.entries(dpi.reconciliation || {}).map(([user, records]) => [user, records[appid]])
-    .filter(([, record]) => record);
   const policySelect = el('select', { 'aria-label': 'Game Proton overlay DPI policy' },
     dpiOptions(true, savedPolicy));
   policySelect.addEventListener('change', () => {
@@ -1699,23 +1900,13 @@ async function viewGame() {
         ])
       )
     ),
+    playerApplicationCard(dpi, launch, appid, players),
+    launchOptionsCard(launch, appid),
     card(
       el('div', { class: 'compact-setting' },
         el('label', { class: 'compact-setting-label' },
           el('span', { text: 'Proton overlay DPI' }), dpiInfo()),
-        policySelect),
-      el('div', { class: 'dpi-status' },
-        el('strong', { text: 'Latest reconciliation by player' }),
-        playerStates.length ? el('dl', { class: 'review' }, playerStates.map(([user, record]) =>
-          el('div', { class: 'review-row' },
-            el('dt', { text: displayName(user) }),
-            el('dd', null,
-              badge(record.status === 'error' ? 'err' : (record.pending_restore || record.status === 'no-prefix' ? 'warn' : 'ok'),
-                record.pending_restore
-                  ? `Pending restore — ${humanise(record.status === 'pending-restore' ? 'waiting for login' : record.status)}`
-                  : humanise(record.status || 'unknown')),
-              record.error ? el('span', { class: 'dpi-error', text: record.error }) : null)))) :
-          el('p', { class: 'help', text: 'No enrolled player has reconciled this game yet.' }))
+        policySelect)
     )
   );
 }
@@ -2434,8 +2625,6 @@ const pageTitle = document.getElementById('page-title');
 const pageSubtitle = document.getElementById('page-subtitle');
 const checkedAt = document.getElementById('checked-at');
 const refreshButton = document.getElementById('refresh');
-const sidebarDot = document.getElementById('sidebar-dot');
-const sidebarState = document.getElementById('sidebar-state');
 
 function routeContext() {
   const path = location.hash.replace(/^#\/?/, '');
@@ -2473,19 +2662,6 @@ function renderFlash() {
       flash.raw ? disclosure('Technical detail', el('pre', { class: 'raw', text: flash.raw }), 'card-disclosure') : null
     )
   );
-}
-
-function updateSidebar() {
-  load.doctor().then(data => {
-    const labels = { ok: 'All systems ready', warn: 'Needs attention', err: 'Problem found' };
-    sidebarDot.dataset.tone = data.tone;
-    sidebarState.textContent = labels[data.tone];
-    if (state.checkedAt) checkedAt.textContent = 'Checked at ' + timeOfDay(state.checkedAt);
-  }).catch(() => {
-    sidebarDot.dataset.tone = 'err';
-    sidebarState.textContent = 'Cannot reach machine';
-    checkedAt.textContent = '';
-  });
 }
 
 async function navigate(options) {
@@ -2531,7 +2707,6 @@ async function navigate(options) {
   checkedAt.textContent = state.checkedAt ? 'Checked at ' + timeOfDay(state.checkedAt) : '';
   // Moving focus to the new page is what a full page load would have done.
   if (settings.focus) view.focus();
-  updateSidebar();
 }
 
 refreshButton.addEventListener('click', async () => {

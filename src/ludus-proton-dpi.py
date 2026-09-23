@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Reconcile Ludus-managed Wine DPI values in the active player's prefixes."""
 import grp
+import fcntl
 import hashlib
 import json
 import os
@@ -37,7 +38,7 @@ def validate_config(value):
     global_settings, games = value.get("global"), value.get("games")
     if not isinstance(global_settings, dict) or not isinstance(games, dict):
         raise ValueError("invalid game-settings schema")
-    if set(value) != {"version", "global", "games"} or set(global_settings) - {"proton_overlay_dpi"}:
+    if set(value) != {"version", "global", "games"} or set(global_settings) - {"proton_overlay_dpi", "launch_options"}:
         raise ValueError("unknown game-settings field")
     dpi = global_settings.get("proton_overlay_dpi")
     if dpi is not None and dpi not in SCALES:
@@ -45,11 +46,23 @@ def validate_config(value):
     for appid, settings in games.items():
         if not isinstance(appid, str) or not APPID.fullmatch(appid) or not isinstance(settings, dict):
             raise ValueError("invalid per-game settings")
-        if set(settings) - {"proton_overlay_dpi"}:
+        if set(settings) - {"proton_overlay_dpi", "launch_options"}:
             raise ValueError(f"unknown setting for app {appid}")
         policy = settings.get("proton_overlay_dpi", "inherit")
         if policy not in ({"inherit", "disabled"} | set(SCALES)):
             raise ValueError(f"invalid Proton overlay DPI for app {appid}")
+    if "launch_options" in global_settings or any("launch_options" in item for item in games.values()):
+        import importlib.machinery
+        import importlib.util
+        path = os.path.join(os.path.dirname(__file__), "ludus-launch-options")
+        if not os.path.exists(path): path += ".py"
+        loader = importlib.machinery.SourceFileLoader("launch_options", path)
+        spec = importlib.util.spec_from_loader("launch_options", loader)
+        launch = importlib.util.module_from_spec(spec)
+        loader.exec_module(launch)
+        launch.validate_policy(global_settings.get("launch_options", {}))
+        for item in games.values():
+            launch.validate_policy(item.get("launch_options", {}), game=True)
     return value
 
 
@@ -355,7 +368,8 @@ def save_policy(argument, config_path=CONFIG, state_path=STATE):
         appid, value = argument.get("appid"), argument.get("policy")
         if not isinstance(appid, str) or not APPID.fullmatch(appid): raise ValueError("invalid app ID")
         if value not in ({"inherit", "disabled"} | set(SCALES)): raise ValueError("invalid game Proton DPI policy")
-        if value == "inherit": config["games"].pop(appid, None)
+        if value == "inherit":
+            config["games"].get(appid, {}).pop("proton_overlay_dpi", None)
         else: config["games"].setdefault(appid, {})["proton_overlay_dpi"] = value
     else: raise ValueError("invalid Proton DPI scope")
     validate_config(config)
@@ -403,4 +417,9 @@ def main():
     raise SystemExit("usage: ludus-proton-dpi reconcile USER | settings | save | uninstall-check")
 
 
-if __name__ == "__main__": main()
+if __name__ == "__main__":
+    # Serialize both features' read/modify/write operations on the shared policy.
+    with open("/etc/ludus/game-settings.lock", "a") as lock:
+        os.chmod(lock.name, 0o600)
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        main()

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Narrow root API for the unprivileged Ludus WebUI. GPL-3.0-or-later."""
+import contextlib
 import grp
 import hashlib
 import json
@@ -8,6 +9,7 @@ import pwd
 import socket
 import struct
 import subprocess
+import threading
 import time
 
 SOCKET = "/run/ludus/backend.sock"
@@ -22,6 +24,7 @@ VSCODE_POLICY = "/usr/local/lib/ludus/ludus_vscode_ssh.pp"
 GREETER_DISPLAY_CONFIG = "/etc/ludus/greeter-display.json"
 GAMES_HELPER = "/usr/local/lib/ludus/ludus-games"
 PROTON_DPI_HELPER = "/usr/local/lib/ludus/ludus-proton-dpi"
+LAUNCH_OPTIONS_HELPER = "/usr/local/lib/ludus/ludus-launch-options"
 READ = {
     "status": ["status"], "doctor": ["doctor"],
     # Read-only structured reporting for the WebUI. Neither command changes
@@ -41,6 +44,54 @@ WRITE = {
     "libraries.repair": ["libraries", "repair"], "repair": ["repair"],
     "disks.mount": ["disks", "mount"],
 }
+
+# Reads may run alongside each other; any other operation runs alone, exactly
+# as when this daemon handled one request at a time. PAM checks touch no Ludus
+# state, so a sign-in never waits behind a long repair or disk operation.
+SHARED = set(READ) | {"proton_dpi.settings", "launch_options.settings", "games.list",
+                      "webui.settings", "mqtt.settings", "greeter.display.settings"}
+UNLOCKED = {"webui.pam_auth"}
+MAX_WORKERS = 16
+
+
+class SharedExclusiveLock:
+    """Writer-preferring lock, so a queued write is not starved by page reads."""
+    def __init__(self):
+        self.condition = threading.Condition()
+        self.readers = 0
+        self.writing = False
+        self.waiting_writers = 0
+
+    @contextlib.contextmanager
+    def shared(self):
+        with self.condition:
+            while self.writing or self.waiting_writers:
+                self.condition.wait()
+            self.readers += 1
+        try:
+            yield
+        finally:
+            with self.condition:
+                self.readers -= 1
+                self.condition.notify_all()
+
+    @contextlib.contextmanager
+    def exclusive(self):
+        with self.condition:
+            self.waiting_writers += 1
+            while self.writing or self.readers:
+                self.condition.wait()
+            self.waiting_writers -= 1
+            self.writing = True
+        try:
+            yield
+        finally:
+            with self.condition:
+                self.writing = False
+                self.condition.notify_all()
+
+
+OPERATIONS = SharedExclusiveLock()
 
 
 def peer_ok(connection):
@@ -261,18 +312,19 @@ def test_mqtt():
 
 def dispatch(request):
     operation = request.get("operation")
-    if operation in {"proton_dpi.settings", "proton_dpi.save"}:
-        command = [PROTON_DPI_HELPER, "settings" if operation.endswith("settings") else "save"]
+    if operation in {"proton_dpi.settings", "proton_dpi.save", "launch_options.settings", "launch_options.save"}:
+        helper = LAUNCH_OPTIONS_HELPER if operation.startswith("launch_options.") else PROTON_DPI_HELPER
+        command = [helper, "settings" if operation.endswith("settings") else "save"]
         argument = request.get("argument")
         if operation.endswith("save") and not isinstance(argument, dict):
-            raise RuntimeError("invalid Proton DPI request")
+            raise RuntimeError("invalid game settings request")
         completed = subprocess.run(
             command, input=(json.dumps(argument) if operation.endswith("save") else None),
-            text=True, capture_output=True, timeout=30, check=False)
+            text=True, capture_output=True, timeout=120, check=False)
         if completed.returncode:
             return {"ok": False, "output": completed.stdout, "error": completed.stderr}
         try: payload = json.loads(completed.stdout)
-        except ValueError: raise RuntimeError("invalid Proton DPI helper response")
+        except ValueError: raise RuntimeError("invalid game settings helper response")
         return {"ok": True, "settings": payload}
     if operation == "games.list":
         completed = subprocess.run([GAMES_HELPER], text=True, capture_output=True,
@@ -351,7 +403,13 @@ def handle(connection):
     try:
         if not peer_ok(connection):
             raise RuntimeError("unauthorised local client")
-        response = dispatch(receive(connection))
+        request = receive(connection)
+        operation = request.get("operation") if isinstance(request, dict) else None
+        if operation in UNLOCKED:
+            response = dispatch(request)
+        else:
+            with OPERATIONS.shared() if operation in SHARED else OPERATIONS.exclusive():
+                response = dispatch(request)
     except Exception as error:
         response = {"ok": False, "error": str(error)}
     try:
@@ -374,10 +432,24 @@ def main():
     os.chown(SOCKET, 0, grp.getgrnam(GROUP).gr_gid)
     os.chmod(SOCKET, 0o660)
     server.listen()
+    workers = threading.BoundedSemaphore(MAX_WORKERS)
+
+    def serve(client):
+        try:
+            with client:
+                handle(client)
+        finally:
+            workers.release()
+
     while True:
-        client, _address = server.accept()
-        with client:
-            handle(client)
+        # Bound concurrent root work; further clients wait in the listen queue.
+        workers.acquire()
+        try:
+            client, _address = server.accept()
+        except BaseException:
+            workers.release()
+            raise
+        threading.Thread(target=serve, args=(client,), daemon=True).start()
 
 
 if __name__ == "__main__":

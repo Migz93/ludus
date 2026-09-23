@@ -45,6 +45,23 @@ elif [[ -e /var/lib/ludus/proton-dpi/state.json ]]; then
   fi
   echo "Warning: --force selected; continuing without checking the retained Proton DPI state." >&2
 fi
+launch_helper=/usr/local/lib/ludus/ludus-launch-options
+if [[ -x "$launch_helper" ]]; then
+  launch_status=0
+  launch_blockers=$("$launch_helper" uninstall-check) || launch_status=$?
+  if (( launch_status != 0 )); then
+    echo "Launch-options recovery needs attention: $launch_blockers" >&2
+    echo "Remove launch management in the Games page, then let affected players log in and out. Resolve conflicts or accept their manual overrides before retrying." >&2
+    if [[ "$force" != true ]]; then
+      echo "Uninstall stopped. Use --force only to leave the current launch options in place." >&2
+      exit 1
+    fi
+    echo "Warning: leaving launch options unchanged; private recovery records are retained." >&2
+  fi
+elif [[ -e /var/lib/ludus/launch-options/users.json && "$force" != true ]]; then
+  echo "Launch-options recovery records exist but the helper is missing. Repair the installation before removing it, or use --force to leave launch options unchanged." >&2
+  exit 1
+fi
 if pgrep -x steam >/dev/null 2>&1 || pgrep -x steamwebhelper >/dev/null 2>&1; then
   echo "Steam is still running. Sign out of Ludus and close Steam before uninstalling." >&2
   exit 1

@@ -1,6 +1,6 @@
 # Current Status
 
-Updated: 2026-08-28
+Updated: 2026-09-23
 
 ## Implemented
 
@@ -16,6 +16,10 @@ Updated: 2026-08-28
   installed-game inventory, and optional MQTT configuration.
 - Disabled-by-default Proton overlay DPI repair with console and per-game
   policy, active-player-only reconciliation, audit backup, and queued restore.
+- Disabled-by-default Steam launch policy with ScopeBuddy profiles (adaptive
+  native, fixed-resolution upscale, custom), console/per-game controls,
+  per-player replace-temporarily or manual override acceptance, and journalled
+  restoration.
 - SELinux policy for optional VS Code Remote SSH forwarding, with checks
   exposed through `ludusctl doctor`.
 - Optional Home Assistant MQTT discovery, player selection, status reporting,

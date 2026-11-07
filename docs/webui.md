@@ -95,3 +95,10 @@ MangoApp without a probe requirement. Applied means configuration was reconciled
 not that overlay visibility was verified. Errors and manual command conflicts are
 shown in Player application. ScopeBuddy/game-argument reset controls and MangoHud
 reset are independent; use both before uninstalling if both were managed.
+
+Player application exposes saved edited HUD commands in an expandable history.
+Resume preserves original launch arguments; Replace temporarily may use a
+pre-Ludus or narrowly cleaned HUD-free restoration baseline, as its notification
+explains. Legacy unowned HUD references are surfaced as actionable conflicts even
+when MangoHud is Off. Complex commands that cannot be cleaned safely remain
+untouched.

@@ -1848,16 +1848,20 @@ function playerApplicationCard(dpi, launch, appid, players = []) {
       return node;
     };
     let action = null;
-    if (record && record.accepted) action = button('resume', 'Resume management', 'Management will resume at next login');
+    if (record && record.accepted) action = button('resume', 'Resume management', 'Management will resume at next login; original options are preserved, and edited HUD commands are kept in recovery history');
     else if (record && record.status === 'conflict') action = [
-      button('replace', 'Replace temporarily', 'Replacement queued; the current value is restored when management is removed'),
+      button('replace', 'Replace temporarily', 'Replacement queued; HUD commands use a pre-Ludus or cleaned baseline for restoration. Edited commands are kept in recovery history'),
       button('accept', 'Accept manual override', 'Manual override accepted')];
     const launchState = state.error ? ['err', 'Error', state.error] : launchApplicationState(record, launchApplies);
     return el('div', { class: 'application-player' },
       el('strong', { text: displayName(user) }),
       applicationStatus('Proton overlay DPI', dpiApplicationState(((dpi.reconciliation || {})[user] || {})[appid], dpiTarget)),
       applicationStatus('Steam launch options', launchState, action),
-      applicationStatus('MangoHud', mangoApplicationState(record, mangoEnabled(launch, appid), state)));
+      applicationStatus('MangoHud', mangoApplicationState(record, mangoEnabled(launch, appid), state)),
+      record && (record.hud_manual_backups || record.hud_manual_backup)
+        ? disclosure('Saved edited launch commands', el('div', null,
+          (record.hud_manual_backups || [record.hud_manual_backup]).map(value => el('pre', null,
+            el('code', { class: 'path', text: value }))))) : null);
   });
   return card(cardHead('Player application'),
     rows.length ? rows : el('p', { class: 'help', text: 'No players are enrolled.' }));

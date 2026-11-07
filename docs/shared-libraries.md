@@ -242,10 +242,21 @@ intact. Uninstall blocks while private managed config or launch recovery remains
 resume accepted management and reset to resolve those references. Resume and
 Replace temporarily retain the earlier pre-Ludus restoration baseline when the
 edited command still contains Ludus's private HUD reference; the edited command
-is retained in the private recovery record as `hud_manual_backup` for audit.
-Restoration therefore returns to the pre-Ludus command, rather than re-enabling
+is appended to the private recovery record’s `hud_manual_backups` history,
+visible under **Saved edited launch commands** in Player application. The legacy
+`hud_manual_backup` value is retained and included when extending the history.
+Resume preserves the prior replacement flag, so original arguments remain in
+the active managed command unless Replace temporarily was previously selected.
+Restoration returns to the pre-Ludus command, rather than re-enabling
 the overlay or preserving later edits to the managed command as active options.
-If no safe baseline exists, the record stays conflicted for administrator review.
+An unmanaged value containing Ludus HUD references is reported as a conflict,
+including legacy records left disabled by older builds. If no safe baseline
+exists, Resume leaves the record conflicted. **Replace temporarily** can then
+remove only the exact generated `env MANGOHUD_CONFIGFILE=...` prefix, its normal
+`MANGOHUD=1` activation, or the `--mangoapp` flag inside the recognised ScopeBuddy
+command. Remaining command text becomes the restoration baseline; the full
+edited command is still retained in history. Ambiguous or complex shell commands
+stay conflicted and untouched. This recovery works even when MangoHud is Off.
 Alternatively, deliberately use `--force` to retain config and recovery records.
 
 ScopeBuddy management also reports existing manual MangoHud activation/config as

@@ -412,17 +412,64 @@ def hud_reference(value, path):
     return str(path) in value or shlex.quote(str(path)) in value
 
 
-def recovery_original(record, current, path):
+def strip_owned_hud(value, path):
+    """Remove only the exact generated HUD prefix, after explicit replacement."""
+    if any(c in value for c in '\n\r\x00$`;&|<>()'):
+        raise ValueError('Complex HUD command needs manual review before replacement')
+    words = list(re.finditer(r'''(?:[^\s'"\\]+|'[^']*'|"(?:\\.|[^"\\])*"|\\.)+''', value))
+    tokens = shlex.split(value)
+    if len(tokens) != len(words) or tokens.count('%command%') != 1:
+        raise ValueError('Ambiguous HUD command; replacement skipped')
+    assignments = [i for i, t in enumerate(tokens) if t == 'MANGOHUD_CONFIGFILE=' + str(path)]
+    if len(assignments) != 1: raise ValueError('Expected one private HUD reference')
+    index = assignments[0]
+    prefix = 'env MANGOHUD_CONFIGFILE=' + shlex.quote(str(path))
+    if index < 1 or value[words[index-1].start():words[index].end()] != prefix:
+        raise ValueError('Private HUD reference is not the generated prefix')
+    end = index + 1
+    remove = []
+    if end < len(tokens) and tokens[end] == 'MANGOHUD=1':
+        end += 1
+        if end >= len(tokens) or tokens[end] != '%command%':
+            raise ValueError('Unexpected command after generated MangoHud prefix')
+    else:
+        wrapper = end
+        while wrapper < len(tokens) and tokens[wrapper] in AUTO_ENVIRONMENT: wrapper += 1
+        if wrapper >= len(tokens) or tokens[wrapper] not in ('scb', 'scopebuddy'):
+            raise ValueError('Expected managed ScopeBuddy after HUD prefix')
+        try: separator = tokens.index('--', wrapper + 1)
+        except ValueError: raise ValueError('ScopeBuddy separator is missing')
+        if separator + 1 >= len(tokens) or tokens[separator+1] != '%command%':
+            raise ValueError('Unexpected ScopeBuddy command ordering')
+        flags = [i for i in range(wrapper + 1, separator) if tokens[i] == '--mangoapp']
+        if len(flags) != 1: raise ValueError('Expected one managed MangoApp flag')
+        flag = flags[0]
+        remove.append((words[flag].start(), words[flag+1].start()))
+    remove.append((words[index-1].start(), words[end].start()))
+    for start, stop in sorted(remove, reverse=True): value = value[:start] + value[stop:]
+    if hud_reference(value, path): raise ValueError('HUD reference remains after cleanup')
+    return value
+
+
+def recovery_original(record, current, path, allow_scrub=False):
     if not hud_reference(current, path): return current
     if 'original' not in record or hud_reference(record['original'], path):
-        raise ValueError('Cannot safely restore a command containing Ludus HUD references; manual conflict remains')
-    # Keep the pre-Ludus baseline, and retain the edited managed command for audit.
+        if not allow_scrub:
+            raise ValueError('No safe HUD baseline; use Replace temporarily to remove exact Ludus HUD tokens')
+        baseline = strip_owned_hud(current, path)
+    else: baseline = record['original']
+    # Keep every edited managed command, including the previous-format audit.
+    history = record.setdefault('hud_manual_backups', [])
+    previous = record.get('hud_manual_backup')
+    if previous is not None and previous not in history: history.append(previous)
+    history.append(current)
     record['hud_manual_backup'] = current
-    return record['original']
+    return baseline
 
 
-def reconcile_file(path, records, policy, installed, persist, scopebuddy, mangohud_path=None, mangohud_error=None):
+def reconcile_file(path, records, policy, installed, persist, scopebuddy, mangohud_path=None, mangohud_error=None, hud_owned_path=None):
     """Journal each planned value before replacing VDF; recover interrupted writes."""
+    hud_owned_path = hud_owned_path or mangohud_path
     text, mode = read_text(path)
     if os.stat(path, follow_symlinks=False).st_uid != os.getuid():
         raise ValueError('Steam configuration must belong to this player')
@@ -456,12 +503,12 @@ def reconcile_file(path, records, policy, installed, persist, scopebuddy, mangoh
             if hud_requested and mangohud_error: record['mangohud_error'] = mangohud_error
             else: record.pop('mangohud_error', None)
             if record.pop('resume', False):
-                if hud_reference(current, mangohud_path):
-                    try: baseline = recovery_original(record, current, mangohud_path)
+                if hud_reference(current, hud_owned_path):
+                    try: baseline = recovery_original(record, current, hud_owned_path)
                     except ValueError as error:
                         record.update(status='conflict', current=current, error=str(error))
                         continue
-                    record.update(original=baseline, last=current, managed=True, replaced=True)
+                    record.update(original=baseline, last=current, managed=True, replaced=record.get('replaced', False))
                 else:
                     record.pop('original', None)
                     record['managed'] = False
@@ -474,11 +521,15 @@ def reconcile_file(path, records, policy, installed, persist, scopebuddy, mangoh
                     continue
                 # Keep that value to restore, and build the managed command
                 # without it for as long as Ludus owns this game.
-                try: baseline = recovery_original(record, current, mangohud_path)
+                try: baseline = recovery_original(record, current, hud_owned_path, allow_scrub=True)
                 except ValueError as error:
                     record.update(status='conflict', current=current, error=str(error))
                     continue
                 record.update(original=baseline, last=current, managed=True, replaced=True)
+            if not record.get('managed') and hud_reference(current, hud_owned_path):
+                record.update(status='conflict', current=current,
+                              error='Unowned Ludus HUD reference; use Replace temporarily to recover')
+                continue
             if record.get('managed') and current != record.get('last'):
                 record.update(status='conflict', current=current)
                 continue
@@ -536,7 +587,7 @@ def validate_state(state):
         raise ValueError('Invalid launch-options recovery state')
     hud = state.get('mangohud', {})
     if not isinstance(hud, dict): raise ValueError('Invalid MangoHud recovery state')
-    for field in ('last', 'pending', 'backup', 'error', 'status'):
+    for field in ('last', 'pending', 'backup', 'error', 'status', 'drift_backup', 'backup_note'):
         if field in hud and not isinstance(hud[field], str): raise ValueError('Invalid MangoHud recovery value')
     if 'backup_done' in hud and type(hud['backup_done']) is not bool:
         raise ValueError('Invalid MangoHud backup flag')
@@ -549,9 +600,14 @@ def validate_state(state):
             for field in ('managed', 'accepted', 'resume', 'replaced'):
                 if field in record and type(record[field]) is not bool:
                     raise ValueError('Invalid recovery flag')
-            for field in ('original', 'last', 'current', 'preview'):
+            for field in ('original', 'last', 'current', 'preview', 'hud_manual_backup'):
                 if record.get(field) is not None and not isinstance(record[field], str):
                     raise ValueError('Invalid recorded launch value')
+            if 'hud_manual_backup' in record and not isinstance(record['hud_manual_backup'], str):
+                raise ValueError('Invalid HUD command audit')
+            if 'hud_manual_backups' in record and (not isinstance(record['hud_manual_backups'], list)
+                    or any(not isinstance(value, str) for value in record['hud_manual_backups'])):
+                raise ValueError('Invalid HUD command history')
             if record.get('managed') and ('original' not in record or 'last' not in record):
                 raise ValueError('Managed launch value is missing recovery data')
             replace = record.get('replace')
@@ -615,7 +671,7 @@ def worker(request, home=None):
                 installed = installed_apps(request['libraries'] + [str(root)])
                 hud_state = state.setdefault('mangohud', {})
                 persist = lambda: json_write(path, state)
-                hud_path, hud_error = str(HUD.config_path(home)), None
+                hud_path, hud_error = None, None
                 if any(HUD.effective(request['config'], appid) is not None for appid in installed):
                     try:
                         hud_path = HUD.prepare(home, HUD.layout(request['config']), hud_state, persist, HUD_IO)
@@ -623,7 +679,7 @@ def worker(request, home=None):
                         hud_error = str(error)
                         hud_state.update(status='error', error=hud_error)
                 reconcile_file(vdf, records, request['config'], installed,
-                               persist, scopebuddy_check(), hud_path, hud_error)
+                               persist, scopebuddy_check(), hud_path, hud_error, str(HUD.config_path(home)))
                 # Keep the config if any actual Steam value still refers to it,
                 # including accepted manual overrides and unresolved conflicts.
                 apps = apps_block(read_text(vdf)[0])

@@ -105,3 +105,34 @@ class MangoHudWebTests(unittest.TestCase):
         assert(mangoApplicationState({status:'disabled'}, false, {mangohud:{error:'old config error'}})[1] === 'Disabled', 'disabled games must not inherit player HUD errors');
         assert(mangoApplicationState({status:'disabled'}, true, {mangohud:{error:'current config error'}})[1] === 'Error', 'enabled games must report config errors');
         ''')
+
+    def test_player_history_and_replacement_explanation(self):
+        source = self.source[self.source.index('function playerApplicationCard('):self.source.index('async function viewGames(')]
+        self.execute(r'''
+        const nodes = [];
+        let request;
+        function el(tag, props, ...children) {
+          const n = Object.assign({tag,children:children.flat(Infinity),listeners:{},
+            addEventListener(event, cb) { this.listeners[event] = cb; }},props);
+          nodes.push(n); return n;
+        }
+        const card = (...children) => el('card',null,...children);
+        const cardHead = text => el('header',{text});
+        const displayName = user => user;
+        const applicationStatus = () => null;
+        const dpiApplicationState = () => [];
+        const launchApplicationState = () => [];
+        const mangoApplicationState = () => [];
+        const mangoEnabled = () => true;
+        const disclosure = (label,body) => el('details',{label},body);
+        const mutate = (node,value) => { request=value; };
+        ''' + source + r'''
+        playerApplicationCard({games:{},global:{}}, {games:{},global:{},users:{alice:{accounts:{'123':{'42':{
+          status:'conflict', hud_manual_backups:['first private command','second private command']
+        }}}}}}, '42');
+        for (const command of ['first private command','second private command']) {
+          if (!nodes.some(n => n.tag === 'code' && n.text === command)) throw new Error('command history missing');
+        }
+        nodes.find(n => n.text === 'Replace temporarily').listeners.click();
+        if (!request.success.includes('baseline') || !request.success.includes('history')) throw new Error('replacement explanation missing');
+        ''')

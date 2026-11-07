@@ -77,6 +77,38 @@ class PolicyTests(unittest.TestCase):
             with self.subTest(old=old), self.assertRaises(ValueError):
                 L.compose(old, p, mangohud_path=path)
 
+    def test_explicit_scrub_preserves_non_hud_text_and_handles_quoted_paths(self):
+        for home in ('/home/player with spaces', "/home/o'brien"):
+            for scoped in (False, True):
+                path = str(H.config_path(home))
+                value = L.compose('PROTON_LOG=1 gamemoderun %command% -old', L.effective(config(scb=scoped), '42'), mangohud_path=path)
+                value += ' -manual'
+                cleaned = L.strip_owned_hud(value, path)
+                self.assertTrue(cleaned.startswith('PROTON_LOG=1 gamemoderun '))
+                self.assertTrue(cleaned.endswith('%command% -old -manual'))
+                self.assertNotIn('MANGOHUD', cleaned)
+                self.assertNotIn('--mangoapp', cleaned)
+                if scoped: self.assertIn('scb -f --', cleaned)
+
+    def test_recovery_state_audit_fields_are_validated(self):
+        for hud in ({'drift_backup': []}, {'backup_note': False}):
+            with self.assertRaises(ValueError): L.validate_state({'version': 1, 'accounts': {}, 'mangohud': hud})
+        for record in ({'hud_manual_backup': []}, {'hud_manual_backups': 'bad'}, {'hud_manual_backups': [False]}):
+            with self.assertRaises(ValueError): L.validate_state({'version': 1, 'accounts': {'123': {'42': record}}})
+
+    def test_owned_reference_does_not_count_as_prepared_config(self):
+        with tempfile.TemporaryDirectory() as temp:
+            vdf = Path(temp) / 'localconfig.vdf'
+            vdf.write_text(document('-old'))
+            records = {}
+            with mock.patch.object(L, 'steam_stopped'):
+                L.reconcile_file(vdf, records, config(), {'42'}, lambda: None, ('scb', []),
+                                 hud_owned_path=str(H.config_path(temp)))
+            self.assertEqual(L.launch_value(L.apps_block(vdf.read_text()), '42'), '-old')
+            self.assertEqual(records['42']['status'], 'conflict')
+            self.assertIn('unavailable', records['42']['error'])
+
+
 
 class PrivateConfigTests(unittest.TestCase):
     def setUp(self):
@@ -169,6 +201,17 @@ class PrivateConfigTests(unittest.TestCase):
         user.write_text('changed before reenable')
         self.prepare()
         self.assertEqual(Path(self.state['backup']).read_text(), 'changed before reenable')
+
+
+    def test_drift_archive_failure_keeps_file_during_prepare_and_cleanup(self):
+        path = Path(self.prepare())
+        path.write_text('manual data')
+        with mock.patch.object(H, 'archive', side_effect=OSError('archive storage full')):
+            with self.assertRaises(OSError): self.prepare()
+            self.assertEqual(path.read_text(), 'manual data')
+            with self.assertRaises(OSError): H.cleanup(self.home, self.state, self.persist, self.io, False)
+        self.assertEqual(path.read_text(), 'manual data')
+        self.assertIn('last', self.state)
 
 
 
@@ -283,6 +326,10 @@ class WorkerTests(unittest.TestCase):
     def test_accept_reset_resume_restores_pre_ludus_baseline(self):
         for scoped in (False, True):
             with self.subTest(scoped=scoped):
+                # Each launch path starts from an independent recovery state.
+                state_path = self.home / '.local/state/ludus/launch-options/state.json'
+                if state_path.exists(): state_path.unlink()
+                self.vdf.write_text(document('-old'))
                 self.run_policy(config(scb=scoped))
                 edited = self.current() + ' -foo'
                 self.vdf.write_text(document(edited))
@@ -309,7 +356,7 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(state['accounts']['123']['42']['hud_manual_backup'], edited)
         self.assertFalse(L.uninstall_blockers({'users': {'alice': state}}, ['alice']))
 
-    def test_no_safe_baseline_keeps_recovery_actionable(self):
+    def test_contaminated_baseline_recovers_through_explicit_replace(self):
         self.run_policy()
         edited = self.current() + ' -foo'
         self.vdf.write_text(document(edited))
@@ -320,8 +367,66 @@ class WorkerTests(unittest.TestCase):
         L.json_write(path, state)
         self.action('replace')
         state = self.run_policy(config(hud=False))
+        self.assertEqual(state['accounts']['123']['42']['status'], 'restored')
+        self.assertEqual(self.current(), '%command% -old -foo')
+        self.assertFalse(H.config_path(self.home).exists())
+        self.assertFalse(L.uninstall_blockers({'users': {'alice': state}}, ['alice']))
+
+    def test_resume_preserves_original_arguments_while_enabled_and_history(self):
+        for scoped in (False, True):
+            with self.subTest(scoped=scoped):
+                path = self.home / '.local/state/ludus/launch-options/state.json'
+                if path.exists(): path.unlink()
+                self.vdf.write_text(document('PROTON_LOG=1 %command% -old'))
+                self.run_policy(config(scb=scoped))
+                edits = []
+                for suffix in (' -first', ' -second'):
+                    edited = self.current() + suffix
+                    edits.append(edited)
+                    self.vdf.write_text(document(edited))
+                    self.run_policy()
+                    self.action('accept')
+                    self.action('resume')
+                    state = self.run_policy()
+                    self.assertIn('PROTON_LOG=1', self.current())
+                    self.assertIn(' -old', self.current())
+                    self.assertIn('--mangoapp' if scoped else 'MANGOHUD=1', self.current())
+                    self.assertNotIn(suffix, self.current())
+                self.assertEqual(state['accounts']['123']['42']['hud_manual_backups'], edits)
+                self.run_policy(config(hud=False))
+                self.assertEqual(self.current(), 'PROTON_LOG=1 %command% -old')
+
+    def test_legacy_unmanaged_hud_value_off_is_recoverable(self):
+        self.run_policy(config(scb=True))
+        edited = self.current() + ' -legacy'
+        path = self.home / '.local/state/ludus/launch-options/state.json'
+        state = L.json_read(path, {})
+        state['accounts']['123']['42'] = {'managed': False, 'status': 'disabled'}
+        L.json_write(path, state)
+        self.vdf.write_text(document(edited))
+        state = self.run_policy(config(hud=False))
         self.assertEqual(state['accounts']['123']['42']['status'], 'conflict')
+        self.action('replace')
+        state = self.run_policy()
+        self.assertIn(' -legacy', self.current())
+        self.assertNotIn('--mangoapp', self.current())
+        self.assertNotIn('MANGOHUD_CONFIGFILE', self.current())
+        self.assertFalse(L.uninstall_blockers({'users': {'alice': state}}, ['alice']))
+
+    def test_unsafe_legacy_command_remains_untouched(self):
+        self.run_policy()
+        edited = self.current() + '; echo unsafe'
+        self.vdf.write_text(document(edited))
+        path = self.home / '.local/state/ludus/launch-options/state.json'
+        state = L.json_read(path, {})
+        state['accounts']['123']['42'] = {'managed': False}
+        L.json_write(path, state)
+        self.run_policy(config(hud=False))
+        self.action('replace')
+        state = self.run_policy()
         self.assertEqual(self.current(), edited)
+        self.assertEqual(state['accounts']['123']['42']['status'], 'conflict')
+
 
     def test_failed_initial_prepare_then_disable_clears_error(self):
         with mock.patch.object(H, 'prepare', side_effect=ValueError('symlink')):

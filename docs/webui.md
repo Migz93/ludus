@@ -11,17 +11,39 @@ The service only opens the port in a `home`, `internal`, `trusted`, or
 directly connected private IPv4 subnets. If the active zone is unsupported,
 configure it before enabling LAN access.
 
-The built-in server is HTTP-only. HTTP Basic/PAM credentials are plaintext on
-the network without an external TLS layer.
+The built-in server is HTTP-only. Login credentials and session cookies travel
+in plaintext on the network without an external TLS layer.
 
 ## Authentication
 
 The default authentication mode is PAM for local `wheel` administrators. Sign
 in with that administrator's regular Linux password. Settings can instead use a
-local Ludus account or allow either method. A successful PAM sign-in is
-remembered in memory for 15 minutes after the most recent request from the same
-address and credentials. Parallel requests share one PAM check instead of being
-refused by the per-address retry interval.
+local Ludus account or allow either method. Sign-in uses the built-in login
+page rather than a browser password prompt.
+PAM validation still uses the existing privileged backend and requires a local
+`wheel` administrator; local Ludus credentials keep their existing validation.
+
+Successful sign-in creates a random, server-side session held only in memory.
+The browser receives an `HttpOnly`, `SameSite=Strict` session cookie, and never
+stores the password in browser storage or sends it on subsequent API requests.
+Sessions expire after 15 minutes without an authenticated request. **Sign out**
+revokes the current session immediately; restarting the WebUI clears all
+sessions. Changing the authentication mode or local credentials invalidates
+existing sessions on their next request. Authentication disabled mode still
+opens the dashboard directly.
+
+Only the static application shell is public. APIs and game posters require a
+valid session when authentication is enabled, and return JSON `401` responses
+without a `WWW-Authenticate` challenge. Expiry returns the interface to the
+login page, preserving the current section for the next sign-in. Mutating API
+requests require JSON and a session CSRF token. Cross-origin POSTs are refused,
+including login and logout. Sign-in attempts retain the per-address retry limit;
+simultaneous PAM checks for the same credentials share one backend check.
+
+A TLS-terminating reverse proxy must preserve the browser's `Host` and `Origin`
+headers. A sign-in with an HTTPS origin sets the cookie's `Secure` flag; direct
+HTTP access remains supported on trusted networks. Forwarded headers are not
+used to grant access or establish the request origin.
 
 The frontend sends requests to the unprivileged HTTP service; it passes
 privileged operations to the backend via `/run/ludus/backend.sock`. Do not add

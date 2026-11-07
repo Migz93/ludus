@@ -122,6 +122,9 @@ function firstNote(raw) {
  * API
  * ------------------------------------------------------------------ */
 
+let csrfToken = null;
+let signedIn = false;
+
 class ApiError extends Error {
   constructor(message, raw) {
     super(message);
@@ -134,15 +137,17 @@ async function api(path, body) {
   try {
     response = await fetch(path, {
       method: body ? 'POST' : 'GET',
-      headers: body ? { 'Content-Type': 'application/json' } : {},
+      headers: body ? { 'Content-Type': 'application/json', 'X-Ludus-CSRF': csrfToken || '' } : {},
+      credentials: 'same-origin',
       body: body ? JSON.stringify(body) : undefined,
       cache: 'no-store'
     });
   } catch (error) {
     throw new ApiError('This machine could not be reached. Check that it is switched on and on the same network.', String(error));
   }
-  if (response.status === 401) {
-    throw new ApiError('Your administrator sign-in was not accepted. Reload the page to try again.');
+  if (response.status === 401 && path !== '/api/auth/login') {
+    showLogin(signedIn ? 'Your session has expired. Sign in to continue.' : '');
+    throw new ApiError('Sign in to continue.');
   }
   let data = null;
   try {
@@ -2560,7 +2565,7 @@ async function confirmCredentials(username, password, button) {
       assurances(
         'This is not a computer login. It only opens this page.',
         'Only a one-way fingerprint of the password is stored.',
-        'Your browser will ask for the new details the next time you load this page.'
+        'Sign in with the new details when the login page appears.'
       )
     )
   });
@@ -2774,6 +2779,7 @@ function renderFlash() {
 }
 
 async function navigate(options) {
+  if (!signedIn) return;
   const settings = options || {};
   if (!settings.keepFlash) state.flash = null;
 
@@ -2827,7 +2833,82 @@ refreshButton.addEventListener('click', async () => {
 
 window.addEventListener('hashchange', () => navigate({ focus: true }));
 
-if (!location.hash) location.replace('#/dashboard');
-navigate();
+const loginScreen = document.getElementById('login-screen');
+const appLayout = document.getElementById('app-layout');
+const loginForm = document.getElementById('login-form');
+const loginError = document.getElementById('login-error');
+const loginPassword = document.getElementById('login-password');
+const signOut = document.getElementById('sign-out');
+
+function showLogin(message) {
+  signedIn = false;
+  csrfToken = null;
+  state.token += 1;
+  state.flash = null;
+  invalidate();
+  view.replaceChildren();
+  toastHost.replaceChildren();
+  document.getElementById('modal').close();
+  appLayout.hidden = true;
+  loginScreen.hidden = false;
+  loginError.textContent = message || '';
+  loginError.hidden = !message;
+  loginPassword.value = '';
+  document.title = 'Ludus — Sign in';
+  document.getElementById('login-username').focus();
+}
+
+async function openApp(session) {
+  csrfToken = session.csrf;
+  signedIn = true;
+  loginScreen.hidden = true;
+  appLayout.hidden = false;
+  signOut.hidden = !session.required;
+  loginPassword.value = '';
+  invalidate();
+  if (!location.hash) location.replace('#/dashboard');
+  await navigate();
+}
+
+loginForm.addEventListener('submit', async event => {
+  event.preventDefault();
+  const button = document.getElementById('login-submit');
+  setBusy(button, true, 'Signing in…');
+  loginError.hidden = true;
+  try {
+    const session = await api('/api/auth/login', {
+      username: document.getElementById('login-username').value,
+      password: loginPassword.value
+    });
+    await openApp(session);
+  } catch (error) {
+    loginError.textContent = error.message;
+    loginError.hidden = false;
+    loginPassword.value = '';
+    loginPassword.focus();
+  } finally {
+    setBusy(button, false);
+  }
+});
+
+signOut.addEventListener('click', async () => {
+  setBusy(signOut, true, 'Signing out…');
+  try {
+    await api('/api/auth/logout', {});
+    showLogin('You have signed out.');
+  } catch (error) {
+    if (signedIn) toast('err', 'Could not sign out', error.message);
+  } finally {
+    setBusy(signOut, false);
+  }
+});
+
+(async () => {
+  try {
+    await openApp(await api('/api/auth/session'));
+  } catch (error) {
+    if (loginScreen.hidden) showLogin(error.message);
+  }
+})();
 
 })();

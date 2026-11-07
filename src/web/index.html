@@ -44,7 +44,26 @@
   <symbol id="i-logo" viewBox="0 0 24 24"><path d="M4 4v13a3 3 0 0 0 3 3h13"/><path d="M11 8h9"/><path d="M11 13h6"/></symbol>
 </svg>
 
-<div class="layout">
+<main class="login-screen" id="login-screen" hidden>
+  <section class="login-card" aria-labelledby="login-title">
+    <div class="brand">
+      <span class="brand-mark"><svg class="icon" aria-hidden="true"><use href="#i-logo"/></svg></span>
+      <span class="brand-text"><strong>Ludus</strong><small>Living-room console</small></span>
+    </div>
+    <h1 id="login-title">Sign in to Ludus</h1>
+    <p class="help">Use your Linux administrator account or the Ludus account enabled for this machine.</p>
+    <form id="login-form" class="stack-sm">
+      <label for="login-username">Username</label>
+      <input id="login-username" type="text" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required>
+      <label for="login-password">Password</label>
+      <input id="login-password" name="password" type="password" autocomplete="current-password" required>
+      <p id="login-error" class="login-error" role="alert" hidden></p>
+      <button class="btn btn-primary" id="login-submit" type="submit">Sign in</button>
+    </form>
+  </section>
+</main>
+<noscript><p>Enable JavaScript to sign in to Ludus.</p></noscript>
+<div class="layout" id="app-layout" hidden>
   <aside class="sidebar">
     <div class="brand">
       <span class="brand-mark"><svg class="icon" aria-hidden="true"><use href="#i-logo"/></svg></span>
@@ -73,6 +92,7 @@
       </div>
       <div class="topbar-actions">
         <span class="checked" id="checked-at"></span>
+        <button type="button" class="btn btn-ghost" id="sign-out" hidden>Sign out</button>
         <button type="button" class="btn btn-ghost" id="refresh">
           <svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg>
           <span>Refresh</span>

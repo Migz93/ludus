@@ -52,7 +52,7 @@ class SharedExclusiveLockTest(unittest.TestCase):
 
 class PamCheckTest(unittest.TestCase):
     def setUp(self):
-        for table in (W.PAM_FAILURES, W.PAM_SUCCESSES, W.PAM_IN_FLIGHT): table.clear()
+        for table in (W.PAM_FAILURES, W.PAM_IN_FLIGHT): table.clear()
 
     def test_parallel_requests_share_one_pam_check(self):
         calls, started = [], threading.Event()
@@ -72,18 +72,6 @@ class PamCheckTest(unittest.TestCase):
             for thread in threads: thread.join(2)
         self.assertEqual(calls, ['webui.pam_auth'])
         self.assertEqual(results, [True] * 5)
-        self.assertTrue(W.recent_pam_success('10.0.0.2', 'Basic x'))
-
-    def test_remembered_sign_in_expires_after_idle_period(self):
-        with mock.patch.object(W.time, 'monotonic', return_value=1000):
-            W.remember_pam_success('10.0.0.2', 'Basic x')
-        with mock.patch.object(W.time, 'monotonic', return_value=1000 + W.PAM_SUCCESS_TTL - 1):
-            self.assertTrue(W.recent_pam_success('10.0.0.2', 'Basic x'))
-        # The previous request renewed the idle window.
-        with mock.patch.object(W.time, 'monotonic', return_value=1000 + 2 * W.PAM_SUCCESS_TTL - 2):
-            self.assertTrue(W.recent_pam_success('10.0.0.2', 'Basic x'))
-        with mock.patch.object(W.time, 'monotonic', return_value=1000 + 4 * W.PAM_SUCCESS_TTL):
-            self.assertFalse(W.recent_pam_success('10.0.0.2', 'Basic x'))
 
 
 if __name__ == '__main__': unittest.main()

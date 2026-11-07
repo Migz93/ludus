@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Small authenticated management UI; privileged actions go via ludus-backend."""
-import base64, hashlib, hmac, ipaddress, json, os, re, secrets, socket, stat, subprocess, threading, time
+import hashlib, hmac, ipaddress, json, os, re, secrets, socket, stat, subprocess, threading, time
+from http.cookies import SimpleCookie, CookieError
+from urllib.parse import urlsplit
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 CONF = "/etc/ludus/webui.json"
@@ -13,9 +15,11 @@ MAX_HTTP_WORKERS = 16
 HTTP_SOCKET_TIMEOUT = 15
 BACKEND_OPERATION_TIMEOUT = 3610
 PAM_RETRY_INTERVAL = 2
-PAM_SUCCESS_TTL = 15 * 60
+SESSION_TTL = 15 * 60
+SESSION_COOKIE = "ludus_session"
+SESSIONS = {}
+SESSIONS_LOCK = threading.Lock()
 PAM_FAILURES = {}
-PAM_SUCCESSES = {}
 PAM_FAILURES_LOCK = threading.Lock()
 PAM_IN_FLIGHT = {}
 
@@ -37,30 +41,10 @@ def clear_pam_failure(address):
     with PAM_FAILURES_LOCK:
         PAM_FAILURES.pop(address, None)
 
-def recent_pam_success(address, authorization):
-    """Accept parallel browser requests after one PAM check has succeeded.
-
-    Basic authentication attaches the same Authorization value to every API
-    request.  The dashboard loads several APIs together, so treating a second
-    valid request as a retry makes browsers such as Edge show another password
-    prompt.  Keep only a short hash, bound to the client address, in memory.
-    """
-    fingerprint = hashlib.sha256(authorization.encode()).digest()
-    now = time.monotonic()
-    with PAM_FAILURES_LOCK:
-        expiry = PAM_SUCCESSES.get((address, fingerprint), 0)
-        if expiry > now:
-            # Idle expiry: an active administrator is not asked again.
-            PAM_SUCCESSES[(address, fingerprint)] = now + PAM_SUCCESS_TTL
-            return True
-        PAM_SUCCESSES.pop((address, fingerprint), None)
-        return False
-
-def pam_check(address, authorization, username, password):
+def pam_check(address, authorization, username, password, reserved=False):
     """Run one root-side PAM check per credential; parallel requests share it.
 
-    Without this, requests sent alongside the first one after the remembered
-    sign-in expires would hit the retry interval and be refused.
+    Simultaneous form submissions should not trigger duplicate PAM checks.
     """
     key = (address, hashlib.sha256(authorization.encode()).digest())
     with PAM_FAILURES_LOCK:
@@ -74,25 +58,22 @@ def pam_check(address, authorization, username, password):
         pending["done"].wait(20)
         return pending["ok"]
     try:
-        if not allow_pam_attempt(address): return False
+        if not reserved and not allow_pam_attempt(address): return False
         try:
             pending["ok"] = call("webui.pam_auth", {"username": username, "password": password}).get("ok", False)
         except (OSError, ValueError):
             pending["ok"] = False
-        if pending["ok"]: remember_pam_success(address, authorization)
+        if pending["ok"]: clear_pam_failure(address)
         return pending["ok"]
     finally:
         with PAM_FAILURES_LOCK:
             PAM_IN_FLIGHT.pop(key, None)
         pending["done"].set()
 
-def remember_pam_success(address, authorization):
-    fingerprint = hashlib.sha256(authorization.encode()).digest()
-    with PAM_FAILURES_LOCK:
-        PAM_FAILURES.pop(address, None)
-        if len(PAM_SUCCESSES) >= 1024:
-            PAM_SUCCESSES.pop(next(iter(PAM_SUCCESSES)))
-        PAM_SUCCESSES[(address, fingerprint)] = time.monotonic() + PAM_SUCCESS_TTL
+def auth_revision(config):
+    """Invalidate sessions when credentials or the selected policy change."""
+    return hashlib.sha256(json.dumps({key: config.get(key) for key in
+        ("auth_mode", "username", "password_sha256")}, sort_keys=True).encode()).digest()
 
 def cfg():
     with open(CONF, encoding="utf-8") as file:
@@ -127,22 +108,70 @@ PAGE = build_page()
 class Handler(BaseHTTPRequestHandler):
     server_version = "LudusWeb/0.1"
     def log_message(self, _format, *_args): pass
-    def authenticated(self):
-        mode = cfg().get("auth_mode", "none")
-        if mode == "none": return True
-        auth = self.headers.get("Authorization", "")
-        if not auth.startswith("Basic "): return False
+    def session_token(self):
+        cookie = SimpleCookie()
         try:
-            username, password = base64.b64decode(auth[6:], validate=True).decode().split(":", 1)
-            config = cfg()
-        except (ValueError, UnicodeDecodeError, json.JSONDecodeError, OSError): return False
-        local = "username" in config and hmac.compare_digest(username, config["username"]) and hmac.compare_digest(hashlib.sha256(password.encode()).hexdigest(), config["password_sha256"])
-        if mode == "local" or mode == "password": return local
-        if mode == "pam+local" and local: return True
-        if mode in ("pam", "pam+local"):
-            if recent_pam_success(self.client_address[0], auth): return True
-            return pam_check(self.client_address[0], auth, username, password)
-        return False
+            cookie.load(self.headers.get("Cookie", ""))
+            return cookie[SESSION_COOKIE].value if SESSION_COOKIE in cookie else ""
+        except CookieError:
+            return ""
+    def session(self, config):
+        token = self.session_token()
+        now = time.monotonic()
+        with SESSIONS_LOCK:
+            session = SESSIONS.get(token)
+            if session and (session["expires"] <= now or session["revision"] != auth_revision(config)):
+                SESSIONS.pop(token, None)
+                session = None
+            if session:
+                session["expires"] = now + SESSION_TTL
+            return session
+    def authenticated(self):
+        config = cfg()
+        return config.get("auth_mode", "none") == "none" or self.session(config) is not None
+    def same_origin(self):
+        # Never trust forwarding headers supplied by a LAN peer. The proxy must
+        # preserve Host. JSON-only POSTs and no CORS also block cross-site forms.
+        if self.headers.get("Sec-Fetch-Site") == "cross-site": return False
+        origin = self.headers.get("Origin")
+        if origin is None: return True
+        try:
+            parsed = urlsplit(origin)
+        except ValueError:
+            return False
+        return parsed.scheme in ("http", "https") and parsed.netloc == self.headers.get("Host") and not parsed.path and not parsed.query and not parsed.fragment
+    def session_cookie(self, token):
+        # HTTPS reverse proxies preserve the browser's Origin on POST requests.
+        secure = self.headers.get("Origin", "").startswith("https://")
+        return f"{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Strict" + ("; Secure" if secure else "") + ("; Max-Age=0" if not token else "")
+    def login(self, body):
+        username, password = body.get("username"), body.get("password")
+        if not isinstance(username, str) or not isinstance(password, str) or not username or not password:
+            self.send({"ok": False, "error": "Enter your username and password."}, 400); return
+        config = cfg()
+        mode = config.get("auth_mode", "none")
+        local = False
+        if mode in ("local", "password", "pam+local"):
+            if not allow_pam_attempt(self.client_address[0]):
+                self.send({"ok": False, "error": "Wait a moment before trying again."}, 429); return
+            local = hmac.compare_digest(username.encode(), config.get("username", "").encode()) and hmac.compare_digest(hashlib.sha256(password.encode()).hexdigest(), config.get("password_sha256", ""))
+        valid = local or mode == "none"
+        if not valid and mode in ("pam", "pam+local"):
+            # pam_check owns the retry limit for PAM-only mode; the combined
+            # mode already reserved this attempt above.
+            fingerprint = json.dumps([username, password])
+            valid = pam_check(self.client_address[0], fingerprint, username, password, reserved=mode == "pam+local")
+        if not valid:
+            self.send({"ok": False, "error": "Username or password was not accepted."}, 401); return
+        token, csrf = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
+        with SESSIONS_LOCK:
+            now = time.monotonic()
+            for old in [key for key, value in SESSIONS.items() if value["expires"] <= now]: SESSIONS.pop(old)
+            SESSIONS.pop(self.session_token(), None)
+            if len(SESSIONS) >= 1024: SESSIONS.pop(next(iter(SESSIONS)))
+            SESSIONS[token] = {"csrf": csrf, "revision": auth_revision(config), "expires": now + SESSION_TTL}
+        clear_pam_failure(self.client_address[0])
+        self.send({"ok": True, "csrf": csrf, "required": mode != "none"}, extra=[("Set-Cookie", self.session_cookie(token))])
     def send(self, response, code=200, content_type="application/json", extra=()):
         body = response.encode() if isinstance(response, str) else json.dumps(response).encode()
         self.send_response(code); self.send_header("Content-Type", content_type); self.send_header("Content-Length", str(len(body))); self.send_header("Cache-Control", "no-store"); self.send_header("X-Content-Type-Options", "nosniff"); self.send_header("X-Frame-Options", "DENY"); self.send_header("Referrer-Policy", "no-referrer")
@@ -182,22 +211,39 @@ class Handler(BaseHTTPRequestHandler):
         self.send({"ok":False,"error":"poster not found"}, 404)
     def require_auth(self):
         if self.authenticated(): return True
-        self.send_response(401); self.send_header("WWW-Authenticate", 'Basic realm="Ludus"'); self.send_header("Cache-Control", "no-store"); self.end_headers(); return False
+        self.send({"ok": False, "error": "Sign in to continue."}, 401); return False
     def do_GET(self):
+        if self.path in ("/", "/index.html"):
+            self.send_page(); return
         if not self.require_auth(): return
+        if self.path == "/api/auth/session":
+            config = cfg()
+            session = self.session(config)
+            self.send({"ok": True, "required": config.get("auth_mode", "none") != "none", "csrf": session["csrf"] if session else ""}); return
         routes = {"/api/status":"status", "/api/doctor":"doctor", "/api/checks":"doctor.json", "/api/storage":"storage", "/api/users":"users.list", "/api/users/personal-libraries":"users.personal_libraries", "/api/libraries":"libraries.list", "/api/libraries/default":"libraries.default", "/api/libraries/candidates":"libraries.candidates", "/api/libraries/check":"libraries.check", "/api/games":"games.list", "/api/games/proton-dpi":"proton_dpi.settings", "/api/games/launch-options":"launch_options.settings", "/api/disks":"disks.list", "/api/settings":"webui.settings", "/api/greeter-display":"greeter.display.settings", "/api/mqtt":"mqtt.settings"}
         poster = re.fullmatch(r"/api/games/([0-9]+)/poster", self.path)
-        if self.path in ("/", "/index.html"): self.send_page()
-        elif self.path in routes: self.send(call(routes[self.path]))
+        if self.path in routes: self.send(call(routes[self.path]))
         elif poster: self.send_poster(poster.group(1))
         else: self.send({"ok":False,"error":"not found"}, 404)
     def do_POST(self):
-        if not self.require_auth(): return
+        if not self.same_origin():
+            self.send({"ok": False, "error": "Cross-origin request refused."}, 403); return
+        if self.path != "/api/auth/login":
+            if not self.require_auth(): return
+            config = cfg()
+            session = self.session(config)
+            if config.get("auth_mode", "none") != "none" and (not session or not hmac.compare_digest(self.headers.get("X-Ludus-CSRF", "").encode(), session["csrf"].encode())):
+                self.send({"ok": False, "error": "Reload the page before trying again."}, 403); return
         if self.headers.get("Content-Type", "").split(";", 1)[0] != "application/json": self.send({"ok":False,"error":"Content-Type must be application/json"},415); return
         try:
             length = int(self.headers.get("Content-Length", "-1")); assert 0 < length <= MAX_BODY
             body = json.loads(self.rfile.read(length)); assert isinstance(body, dict)
         except (ValueError, json.JSONDecodeError, AssertionError): self.send({"ok":False,"error":"invalid JSON request"},400); return
+        if self.path == "/api/auth/login":
+            self.login(body); return
+        if self.path == "/api/auth/logout":
+            with SESSIONS_LOCK: SESSIONS.pop(self.session_token(), None)
+            self.send({"ok": True}, extra=[("Set-Cookie", self.session_cookie(""))]); return
         routes = {"/api/users/enroll":("users.enroll","user"),"/api/users/remove":("users.remove","user"),"/api/users/personal-libraries/remove":("users.remove_personal_library",None),"/api/libraries/add":("libraries.add","path"),"/api/libraries/add-default":("libraries.add_default","mount"),"/api/libraries/remove":("libraries.remove","path"),"/api/libraries/default":("libraries.set_default","path"),"/api/libraries/label":("libraries.label",None),"/api/games/proton-dpi":("proton_dpi.save",None),"/api/games/launch-options":("launch_options.save",None),"/api/disks/mount":("disks.mount","path"),"/api/repair":("repair",None),"/api/credentials":("webui.rotate",None),"/api/settings/auth-mode":("webui.set_auth_mode","mode"),"/api/settings/vscode-forwarding":("webui.set_vscode_forwarding","enabled"),"/api/settings/vscode-forwarding/repair":("webui.repair_vscode_forwarding",None),"/api/greeter-display":("greeter.display.save",None),"/api/mqtt":("mqtt.save",None),"/api/mqtt/test":("mqtt.test",None)}
         route = routes.get(self.path)
         if not route: self.send({"ok":False,"error":"not found"},404); return

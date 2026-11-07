@@ -48,6 +48,9 @@ def sibling(name):
     return module
 
 
+HUD = sibling('ludus-mangohud')
+
+
 def arguments(value):
     if not isinstance(value, str) or len(value) > 2048:
         raise ValueError('Arguments must be text of at most 2048 characters')
@@ -93,13 +96,15 @@ def effective(config, appid):
     policy = global_policy(config)
     game = config['games'].get(appid, {}).get('launch_options', {})
     mode = game.get('mode', 'inherit')
-    if mode == 'disabled': return dict(DEFAULT)
-    if mode == 'inherit': return policy
-    policy['scopebuddy'] = True
-    if game.get('profile', 'default') != 'default':
-        policy.update(profile=game['profile'], upscale_filter=game.get('upscale_filter', 'nis'),
-                      sharpness=game.get('sharpness'), wrapper_args=game.get('wrapper_args', ''))
-    policy['game_args'] = ' '.join(filter(None, (policy['game_args'], game.get('game_args', ''))))
+    if mode == 'disabled': policy = dict(DEFAULT)
+    elif mode == 'enabled':
+        policy['scopebuddy'] = True
+        if game.get('profile', 'default') != 'default':
+            policy.update(profile=game['profile'], upscale_filter=game.get('upscale_filter', 'nis'),
+                          sharpness=game.get('sharpness'), wrapper_args=game.get('wrapper_args', ''))
+        policy['game_args'] = ' '.join(filter(None, (policy['game_args'], game.get('game_args', ''))))
+    hud = HUD.effective(config, appid)
+    if hud is not None: policy['mangohud'] = hud
     return policy
 
 
@@ -127,10 +132,10 @@ def unavailable_message(missing):
 
 
 def enabled(policy):
-    return policy['scopebuddy'] or bool(policy['game_args'].strip())
+    return policy['scopebuddy'] or bool(policy['game_args'].strip()) or policy.get('mangohud') is not None
 
 
-def compose(original, policy, wrapper_command='scb'):
+def compose(original, policy, wrapper_command='scb', mangohud_path=None):
     """Preserve simple existing wrappers verbatim; reject ambiguous shell grammar."""
     original = original or ''
     extra = shlex.join(arguments(policy['game_args']))
@@ -150,12 +155,23 @@ def compose(original, policy, wrapper_command='scb'):
         if any(re.search(r'(^|/)(scb|scopebuddy)$', token) for token in tokens):
             raise ValueError('Existing wrapper has no %command%; manual override required')
         command = '%command%' + (' ' + original if original else '')
+    hud = policy.get('mangohud') is not None
+    if hud or policy['scopebuddy']:
+        if any(re.search(r'(^|/)(mangohud|mangoapp)$', token) or token.startswith(
+                ('MANGOHUD=', 'MANGOHUD_CONFIG=', 'MANGOHUD_CONFIGFILE=')) for token in tokens):
+            raise ValueError('Existing MangoHud configuration requires a manual override')
+    if hud and any(re.search(r'(^|/)gamescope$', t) or (not policy['scopebuddy'] and
+                   re.search(r'(^|/)(scb|scopebuddy)$', t)) for t in tokens):
+        raise ValueError('Unmanaged launch-wrapper conflict; MangoHud skipped')
+    if hud and not mangohud_path: raise ValueError('Private MangoHud configuration is unavailable')
+    hud_env = ['env', 'MANGOHUD_CONFIGFILE=' + shlex.quote(str(mangohud_path))] if hud else []
     wrappers = [t for t in tokens if re.search(r'(^|/)(scb|scopebuddy)$', t)]
     if policy['scopebuddy']:
         if any(re.search(r'(^|/)gamescope$', token) for token in tokens):
             raise ValueError('Existing Gamescope wrapper requires a manual override')
         environment, gamescope = scopebuddy_arguments(policy)
-        wrapper = ' '.join(environment + [wrapper_command] + ([shlex.join(gamescope)] if gamescope else []) + ['--', '%command%'])
+        if hud: gamescope = [arg for arg in gamescope if arg != '--mangoapp'] + ['--mangoapp']
+        wrapper = ' '.join(hud_env + environment + [wrapper_command] + ([shlex.join(gamescope)] if gamescope else []) + ['--', '%command%'])
         if wrappers:
             # A bare "scb -- %command%" is swapped for the managed wrapper, so it
             # never runs twice; the exact original is still restored later.
@@ -164,6 +180,8 @@ def compose(original, policy, wrapper_command='scb'):
                 raise ValueError('Existing ScopeBuddy command requires a manual override')
             command = '%command%' + (bare.group(1) or '')
         command = command.replace('%command%', wrapper)
+    elif hud:
+        command = command.replace('%command%', ' '.join(hud_env + ['MANGOHUD=1', '%command%']))
     return command + (' ' + extra if extra else '')
 
 
@@ -383,7 +401,7 @@ def installed_apps(libraries):
     return result
 
 
-def reconcile_file(path, records, policy, installed, persist, scopebuddy):
+def reconcile_file(path, records, policy, installed, persist, scopebuddy, mangohud_path=None, mangohud_error=None):
     """Journal each planned value before replacing VDF; recover interrupted writes."""
     text, mode = read_text(path)
     if os.stat(path, follow_symlinks=False).st_uid != os.getuid():
@@ -410,7 +428,13 @@ def reconcile_file(path, records, policy, installed, persist, scopebuddy):
                     record.update(status='conflict', current=current)
                     continue
                 record.pop('transaction', None)
-            target = effective(policy, appid)
+            requested = effective(policy, appid)
+            target = dict(requested)
+            hud_requested = target.get('mangohud') is not None
+            if hud_requested and mangohud_error: target.pop('mangohud', None)
+            record['mangohud_status'] = 'error' if hud_requested and mangohud_error else 'disabled'
+            if hud_requested and mangohud_error: record['mangohud_error'] = mangohud_error
+            else: record.pop('mangohud_error', None)
             if record.pop('resume', False):
                 record.pop('original', None)
                 record['managed'] = False
@@ -433,7 +457,9 @@ def reconcile_file(path, records, policy, installed, persist, scopebuddy):
                     continue
                 desired, managed = record['original'], False
             else:
-                if appid not in installed:
+                removing_hud = (record.get('managed') and record.get('applied_policy', {}).get('mangohud') is not None
+                                and not hud_requested)
+                if appid not in installed and not removing_hud:
                     record['status'] = 'not-installed'
                     continue
                 if target['scopebuddy'] and not available:
@@ -444,7 +470,7 @@ def reconcile_file(path, records, policy, installed, persist, scopebuddy):
                     desired, managed = record['original'], False
                 else:
                     original = '' if record.get('replaced') else (record['original'] if record.get('managed') else current)
-                    try: desired, managed = compose(original, target, wrapper_command or 'scb'), True
+                    try: desired, managed = compose(original, target, wrapper_command or 'scb', mangohud_path), True
                     except ValueError as error:
                         record.update(status='conflict', current=current, error=str(error))
                         continue
@@ -460,7 +486,9 @@ def reconcile_file(path, records, policy, installed, persist, scopebuddy):
                 if read_text(path)[0] != text: raise ValueError('Steam configuration changed during reconciliation')
                 atomic_text(path, updated, mode)
                 text, apps = updated, apps_block(updated)
-            record.update(last=desired, managed=managed, applied_policy=target,
+            if hud_requested and not mangohud_error and managed and not (target['scopebuddy'] and not available):
+                record['mangohud_status'] = 'mangoapp' if target['scopebuddy'] else 'mangohud'
+            record.update(last=desired, managed=managed, applied_policy=requested,
                           status='unavailable' if target['scopebuddy'] and not available else ('applied' if managed else 'restored'))
             record.pop('transaction', None)
             record.pop('current', None)
@@ -475,6 +503,12 @@ def reconcile_file(path, records, policy, installed, persist, scopebuddy):
 def validate_state(state):
     if not isinstance(state, dict) or state.get('version') != 1 or not isinstance(state.get('accounts'), dict):
         raise ValueError('Invalid launch-options recovery state')
+    hud = state.get('mangohud', {})
+    if not isinstance(hud, dict): raise ValueError('Invalid MangoHud recovery state')
+    for field in ('last', 'pending', 'backup', 'error', 'status'):
+        if field in hud and not isinstance(hud[field], str): raise ValueError('Invalid MangoHud recovery value')
+    if 'backup_done' in hud and type(hud['backup_done']) is not bool:
+        raise ValueError('Invalid MangoHud backup flag')
     for account, records in state['accounts'].items():
         if not APPID.fullmatch(account) or not isinstance(records, dict):
             raise ValueError('Invalid Steam account recovery state')
@@ -504,9 +538,17 @@ def validate_state(state):
     return state
 
 
+class HudIO:
+    read_text = staticmethod(read_text)
+    atomic_text = staticmethod(atomic_text)
+
+
+HUD_IO = HudIO()
+
+
 def worker(request, home=None):
     if os.getuid() == 0: raise ValueError('Steam worker must not run as root')
-    home = Path(home or pwd.getpwuid(os.getuid()).pw_dir)
+    home = Path(home or pwd.getpwuid(os.getuid()).pw_dir).resolve()
     directory = home / '.local/state/ludus/launch-options'
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     if directory.is_symlink(): raise ValueError('Launch recovery directory must not be a symlink')
@@ -540,8 +582,26 @@ def worker(request, home=None):
                 account, vdf = steam_account(root)
                 records = state['accounts'].setdefault(account, {})
                 installed = installed_apps(request['libraries'] + [str(root)])
+                hud_state = state.setdefault('mangohud', {})
+                persist = lambda: json_write(path, state)
+                hud_path, hud_error = None, None
+                if any(HUD.effective(request['config'], appid) is not None for appid in installed):
+                    try:
+                        hud_path = HUD.prepare(home, HUD.layout(request['config']), hud_state, persist, HUD_IO)
+                    except (OSError, ValueError, UnicodeError) as error:
+                        hud_error = str(error)
+                        hud_state.update(status='error', error=hud_error)
                 reconcile_file(vdf, records, request['config'], installed,
-                               lambda: json_write(path, state), scopebuddy_check())
+                               persist, scopebuddy_check(), hud_path, hud_error)
+                # Keep the config if any actual Steam value still refers to it,
+                # including accepted manual overrides and unresolved conflicts.
+                apps = apps_block(read_text(vdf)[0])
+                referenced = any(str(HUD.config_path(home)) in (launch_value(apps, appid) or '')
+                                 for appid in apps.entries)
+                if not referenced and hud_error is None:
+                    try: HUD.cleanup(home, hud_state, persist, HUD_IO, referenced=False)
+                    except (OSError, ValueError, UnicodeError) as error:
+                        hud_state.update(status='error', error=str(error))
                 state.pop('error', None)
             except (OSError, ValueError) as error:
                 state['error'] = str(error)
@@ -587,12 +647,17 @@ def public_settings(config, known):
             users[user] = {'accounts': {}, 'error': str(error), 'read_failed': True}
     return {'global': dict(DEFAULT, **config['global'].get('launch_options', {})),
             'games': {appid: item.get('launch_options', {}) for appid, item in config['games'].items()},
-            'users': users, 'available': not missing, 'missing': missing}
+            'users': users, 'available': not missing, 'missing': missing,
+            'mangohud': {'global': HUD.layout(config),
+                         'games': {appid: item.get('mangohud', {}) for appid, item in config['games'].items()},
+                         'preview': HUD.render(HUD.layout(config)), 'positions': HUD.POSITIONS}}
 
 
 def save_policy(config, argument):
     scope = argument.get('scope')
-    if scope == 'reset':
+    if isinstance(scope, str) and scope.startswith('mangohud-'):
+        HUD.save(config, argument)
+    elif scope == 'reset':
         config['global'].pop('launch_options', None)
         for item in config['games'].values(): item.pop('launch_options', None)
     elif scope in ('global', 'game'):
@@ -617,6 +682,9 @@ def uninstall_blockers(settings, known):
     for user, state in settings['users'].items():
         if state.get('read_failed') and user in known:
             blockers.append({'user': user, 'error': state['error']})
+        hud = state.get('mangohud', {})
+        if hud.get('last') or hud.get('pending'):
+            blockers.append({'user': user, 'feature': 'mangohud', 'error': hud.get('error', 'Private HUD configuration remains')})
         for account, records in state['accounts'].items():
             for appid, record in records.items():
                 if record.get('managed') or record.get('transaction'):

@@ -1,6 +1,6 @@
 # Current Status
 
-Updated: 2026-09-23
+Updated: 2026-11-07
 
 ## Implemented
 
@@ -20,12 +20,27 @@ Updated: 2026-09-23
   native, fixed-resolution upscale, custom), console/per-game controls,
   per-player replace-temporarily or manual override acceptance, and journalled
   restoration.
+- Console-wide MangoHud layout and enablement with independent per-game policy,
+  private configuration/audit backup, MangoApp selection for managed ScopeBuddy,
+  and the existing journalled Steam launch writer and recovery controls.
 - SELinux policy for optional VS Code Remote SSH forwarding, with checks
   exposed through `ludusctl doctor`.
 - Optional Home Assistant MQTT discovery, player selection, status reporting,
   and lifecycle controls.
 
+## Local Deployment Validation
+
+- Installed through `sudo ./install.sh` on 2026-11-07 with Plasma Login 6.8.2.
+  All five Ludus services were active, all 23 doctor checks were healthy, and
+  SELinux remained enforcing. The installed MangoHud settings helper responded
+  successfully. Overlay rendering and hotkeys still need target validation.
+
 ## Remaining Validation
+
+- Exercise MangoHud/MangoApp through both launch paths on Bazzite
+  Desktop KDE with NVIDIA, including overlay visibility, metrics, hotkeys,
+  two players, conflicts, reset and uninstall recovery. Native OpenGL injection
+  is not provided by the normal `MANGOHUD=1` path.
 
 - Validate controller hot-plug and additional controller models against the
   KWin gamepad API on the target system.

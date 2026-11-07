@@ -1595,7 +1595,7 @@ function launchOptionsCard(settings, appid) {
     ? el('select', { 'aria-label': 'Game ScopeBuddy policy' },
       ['inherit', 'enabled', 'disabled'].map(value => el('option', {
         value, selected: value === (saved.mode || 'inherit'),
-        text: { inherit: 'Follow default', enabled: 'Enable ScopeBuddy', disabled: 'Disable launch management for this game' }[value]
+        text: { inherit: 'Follow default', enabled: 'Enable ScopeBuddy', disabled: 'Disable ScopeBuddy and game arguments' }[value]
       })))
     : el('input', { type: 'checkbox', checked: saved.scopebuddy, 'aria-label': 'Enable ScopeBuddy globally' });
   const baseName = (LAUNCH_PROFILES.find(([value]) => value === base.profile) || [])[1] || 'Adaptive native';
@@ -1644,8 +1644,12 @@ function launchOptionsCard(settings, appid) {
     const scoped = appid ? mode.value === 'enabled' || (mode.value === 'inherit' && base.scopebuddy) : mode.checked;
     const policy = appid && mode.value === 'inherit' ? base : chosen;
     const argsText = [appid ? base.game_args : '', overriding ? gameArgs.value : ''].filter(Boolean).join(' ');
-    preview.textContent = appid && mode.value === 'disabled' ? 'Original launch options (restoration queued)' :
-      [scoped ? scopebuddyWrapper(policy) : '', '%command%', argsText].filter(Boolean).join(' ');
+    const hud = mangoEnabled(settings, appid);
+    const wrapper = scoped ? scopebuddyWrapper(policy) : '';
+    const withHud = hud && scoped && !wrapper.split(/\s+/).includes('--mangoapp')
+      ? wrapper.replace(/ --$/, ' --mangoapp --') : wrapper;
+    const hudEnv = hud ? 'env MANGOHUD_CONFIGFILE=<player-private-Ludus-config>' + (scoped ? '' : ' MANGOHUD=1') : '';
+    preview.textContent = [hudEnv, withHud, '%command%', appid && mode.value === 'disabled' ? '' : argsText].filter(Boolean).join(' ');
   }
   [mode, profile, filter, sharpness, wrapper, gameArgs].forEach(input => {
     input.addEventListener('input', refreshPreview);
@@ -1669,7 +1673,7 @@ function launchOptionsCard(settings, appid) {
     }, 'Launch options saved');
   });
   const reset = el('button', { class: 'btn', type: 'button',
-    text: appid ? 'Remove management for this game' : 'Remove all launch management' });
+    text: appid ? 'Remove ScopeBuddy and game arguments' : 'Remove all ScopeBuddy and game arguments' });
   reset.addEventListener('click', () => change(reset, appid
     ? { scope: 'game', appid, policy: { mode: 'disabled' } } : { scope: 'reset' }, 'Restoration queued'));
   return card(
@@ -1685,6 +1689,104 @@ function launchOptionsCard(settings, appid) {
       el('pre', null, preview)),
     el('div', { class: 'actions' }, save, reset)
   );
+}
+
+function mangoEnabled(settings, appid) {
+  const hud = settings.mangohud;
+  if (!hud) return false;
+  const mode = appid ? (hud.games[appid] || {}).mode || 'inherit' : 'inherit';
+  return mode === 'inherit' ? hud.global.enabled : mode === 'enabled';
+}
+
+function mangoHudCard(settings, appid) {
+  const hud = settings.mangohud;
+  if (!hud) return null;
+  const saved = hud.global;
+  const fields = {};
+  const mode = appid
+    ? el('select', { 'aria-label': 'Game MangoHud policy' },
+      ['inherit', 'enabled', 'disabled'].map(value => el('option', {
+        value, selected: value === ((hud.games[appid] || {}).mode || 'inherit'),
+        text: { inherit: `Follow default (${saved.enabled ? 'On' : 'Off'})`, enabled: 'On', disabled: 'Off' }[value]
+      })))
+    : el('input', { type: 'checkbox', checked: saved.enabled, 'aria-label': 'Enable MangoHud globally' });
+  const controls = [el('label', { class: 'launch-toggle' },
+    el('span', { text: appid ? 'MangoHud policy' : 'Enable MangoHud globally' }), mode)];
+  if (!appid) {
+    fields.font_size = el('input', { type: 'number', min: 18, max: 64, step: 1,
+      value: saved.font_size, 'aria-label': 'MangoHud font size' });
+    fields.position = el('select', { 'aria-label': 'MangoHud position' },
+      hud.positions.map(value => el('option', { value, text: value, selected: value === saved.position })));
+    fields.toggle_hud = el('input', { type: 'text', maxlength: 100, value: saved.toggle_hud,
+      'aria-label': 'HUD-toggle hotkey', placeholder: 'Shift_R+F12' });
+    for (const [key, label] of [['font_size', 'Font size (18–64)'], ['position', 'Position'], ['toggle_hud', 'Toggle hotkey']]) {
+      controls.push(el('label', null, label, fields[key]));
+    }
+    for (const [key, label] of [['fps', 'FPS'], ['frametime', 'Frame time'], ['cpu_stats', 'CPU usage'],
+      ['cpu_temp', 'CPU temperature'], ['gpu_stats', 'GPU usage'], ['gpu_temp', 'GPU temperature'],
+      ['ram', 'RAM'], ['vram', 'VRAM']]) {
+      fields[key] = el('input', { type: 'checkbox', checked: saved[key], 'aria-label': label });
+      controls.push(el('label', { class: 'launch-toggle' }, label, fields[key]));
+    }
+  }
+  const result = el('p', { class: 'help' });
+  const preview = el('code', { class: 'path', text: hud.preview });
+  const policy = () => Object.assign({}, saved, { enabled: mode.checked }, Object.fromEntries(
+    Object.entries(fields).map(([key, input]) => [key,
+      input.type === 'checkbox' ? input.checked : key === 'font_size' ? Number(input.value) : input.value])));
+  function refresh() {
+    const on = appid ? mode.value === 'inherit' ? saved.enabled : mode.value === 'enabled' : mode.checked;
+    const launchMode = appid ? (settings.games[appid] || {}).mode || 'inherit' : 'inherit';
+    const scoped = launchMode === 'enabled' || launchMode === 'inherit' && settings.global.scopebuddy;
+    result.textContent = !on ? 'Off. Existing user settings are preserved.' : scoped
+      ? 'MangoApp via ScopeBuddy will be requested at the next login. Overlay visibility depends on the game and graphics driver.'
+      : 'MangoHud will be requested at the next login for Vulkan games, including Proton Vulkan games. Native OpenGL is not enabled by this path.';
+    if (!appid) {
+      const value = policy();
+      const valid = Number.isInteger(value.font_size) && value.font_size >= 18 && value.font_size <= 64
+        && /^(?:(?:Shift_[LR]|Control_[LR]|Alt_[LR]|Super_[LR])\+)*(?:F(?:[1-9]|[12][0-9]|3[0-5])|[a-zA-Z0-9]|Home|End|Insert|Delete|Pause|Scroll_Lock)$/.test(value.toggle_hud)
+        && new Set(value.toggle_hud.split('+')).size === value.toggle_hud.split('+').length;
+      preview.textContent = valid ? '# Generated by Ludus; configure through the management WebUI.\n' +
+        Object.entries(value).filter(([key]) => key !== 'enabled').map(([key, val]) =>
+          `${key}=${typeof val === 'boolean' ? Number(val) : val}`).join('\n') + '\n'
+        : 'Correct the font size or toggle hotkey to preview a valid configuration.';
+      save.disabled = !valid;
+    }
+  }
+  const change = (button, body, success) => mutate(button, {
+    path: '/api/games/launch-options', body, success,
+    detail: 'Changes apply at each affected player’s next Ludus login.', failure: 'MangoHud settings could not be saved'
+  });
+  const save = el('button', { class: 'btn btn-primary', type: 'button', text: 'Save MangoHud' });
+  save.addEventListener('click', () => change(save, {
+    scope: appid ? 'mangohud-game' : 'mangohud-global', appid,
+    policy: appid ? { mode: mode.value } : policy()
+  }, 'MangoHud settings saved'));
+  const reset = el('button', { class: 'btn', type: 'button', text: appid ? 'Turn off for this game' : 'Reset MangoHud and restore user settings' });
+  reset.addEventListener('click', () => change(reset, appid
+    ? { scope: 'mangohud-game', appid, policy: { mode: 'disabled' } }
+    : { scope: 'mangohud-reset' }, 'MangoHud restoration queued'));
+  [mode, ...Object.values(fields)].forEach(input => input.addEventListener('input', refresh));
+  refresh();
+  return card(cardHead('MangoHud'),
+    el('div', { class: 'launch-settings' }, controls), result,
+    !appid ? disclosure('Advanced: generated configuration', el('pre', null, preview)) : null,
+    el('div', { class: 'actions' }, save, reset));
+}
+
+function mangoApplicationState(record, applies, state) {
+  if (state.error) return ['err', 'Error', state.error];
+  if (record && (record.accepted || record.status === 'manual-override')) return [null, 'Manual override'];
+  if (record && record.status === 'conflict') return ['err', 'Blocked — launch-options conflict', record.error];
+  if (state.mangohud && state.mangohud.error) return ['err', 'Error', state.mangohud.error];
+  if (record && record.mangohud_error) return ['err', 'Error', record.mangohud_error];
+  if (record && ['error', 'unavailable'].includes(record.status)) return launchApplicationState(record, applies);
+  const previous = record && record.applied_policy && record.applied_policy.mangohud;
+  if (!applies) return previous ? ['warn', 'Pending restore'] : [null, 'Disabled'];
+  if (!record || record.status !== 'applied') return ['warn', 'Pending apply'];
+  if (record.mangohud_status === 'mangoapp') return ['ok', 'Applied — MangoApp via ScopeBuddy'];
+  if (record.mangohud_status === 'mangohud') return ['ok', 'Applied — MangoHud'];
+  return ['warn', 'Pending apply'];
 }
 
 /* One at-a-glance state per player and feature. Detail such as commands and
@@ -1732,7 +1834,7 @@ function playerApplicationCard(dpi, launch, appid, players = []) {
   const dpiPolicy = (dpi.games[appid] || {}).proton_overlay_dpi || 'inherit';
   const dpiTarget = dpiPolicy === 'inherit' ? dpi.global.proton_overlay_dpi : dpiPolicy === 'disabled' ? null : dpiPolicy;
   const launchMode = (launch.games[appid] || {}).mode || 'inherit';
-  const launchApplies = launchMode !== 'disabled' && (launchMode === 'enabled' || launch.global.scopebuddy || !!launch.global.game_args);
+  const launchApplies = mangoEnabled(launch, appid) || launchMode !== 'disabled' && (launchMode === 'enabled' || launch.global.scopebuddy || !!launch.global.game_args);
   const rows = users.map(user => {
     const state = (launch.users || {})[user] || { accounts: {} };
     const accounts = Object.entries(state.accounts || {}).filter(([, records]) => records[appid]);
@@ -1754,7 +1856,8 @@ function playerApplicationCard(dpi, launch, appid, players = []) {
     return el('div', { class: 'application-player' },
       el('strong', { text: displayName(user) }),
       applicationStatus('Proton overlay DPI', dpiApplicationState(((dpi.reconciliation || {})[user] || {})[appid], dpiTarget)),
-      applicationStatus('Steam launch options', launchState, action));
+      applicationStatus('Steam launch options', launchState, action),
+      applicationStatus('MangoHud', mangoApplicationState(record, mangoEnabled(launch, appid), state)));
   });
   return card(cardHead('Player application'),
     rows.length ? rows : el('p', { class: 'help', text: 'No players are enrolled.' }));
@@ -1788,7 +1891,8 @@ async function viewGames() {
           select);
       })()
     ),
-    launchOptionsCard(launch)
+    launchOptionsCard(launch),
+    mangoHudCard(launch)
     ), 'card-disclosure global-settings'),
     errors.length ? notice('warn', 'Some Steam records could not be read',
       `${errors.length} ${plural(errors.length, 'manifest needs', 'manifests need')} attention. Each problem is shown below without hiding the other games.`) : null,
@@ -1902,6 +2006,7 @@ async function viewGame() {
     ),
     playerApplicationCard(dpi, launch, appid, players),
     launchOptionsCard(launch, appid),
+    mangoHudCard(launch, appid),
     card(
       el('div', { class: 'compact-setting' },
         el('label', { class: 'compact-setting-label' },

@@ -56,6 +56,8 @@ system power or lock policy.
 | `/var/lib/ludus/proton-dpi` | Root-private per-player reconciliation state and first-change whole-file audit backups |
 | `/var/lib/ludus/launch-options` | Root-private list of players with possible launch-options recovery state, retained on removal |
 | `~/.local/state/ludus/launch-options` | Player-private launch-options originals, write journal, and accepted overrides (directory 0700, state 0600), retained on removal |
+| `~/.config/ludus/mangohud` | Player-private generated HUD config (0700 directory, 0600 file); removed after queued reset when unreferenced |
+| `~/.local/state/ludus/launch-options/mangohud-backups` | Timestamped user MangoHud audit backups, retained on removal |
 | `/var/cache/ludus/game-art` | Validated local or official-Steam artwork cached by numeric app ID for the WebUI |
 | `/run/ludus` | WebUI backend socket, MQTT status, and transient requests |
 | `/run/ludus-mount` | Mount control socket and active-session marker |
@@ -101,8 +103,8 @@ administrator may deliberately bypass this protection with
 `sudo ./uninstall.sh --force`; the listed registry values are then left as-is.
 
 Managed Steam launch options have a similar uninstall check. Use **Remove all
-launch management** on the Games page and allow each affected player to log in
-and out. Manual conflicts must be resolved or explicitly accepted. `--force`
+ScopeBuddy and game arguments** and **Reset MangoHud and restore user settings**
+on the Games page and allow each affected player to log in and out. Manual conflicts must be resolved or explicitly accepted. `--force`
 leaves the current launch options in place and retains recovery records. Players
 previously reconciled remain included in the check even after unenrolment;
 re-enrol them to complete queued restoration, or deliberately use `--force`.
@@ -116,3 +118,11 @@ but intentionally leaves the `ludus` group, Linux accounts, game data, Steam
 library registrations, timestamped backups, and rpm-ostree build dependencies
 intact. Review `rpm-ostree status` and deliberately uninstall any dependencies
 you no longer need, then reboot.
+
+MangoHud adds `ludus-mangohud` alongside the existing launch helper through the
+installer. It writes private config and audit backups only as the active player;
+no additional privileged service, PAM, firewall or SELinux policy is introduced.
+The existing Steam launch-options uninstall check also protects outstanding HUD
+config recovery. `--force` retains private HUD config and backups. Actual
+MangoHud/MangoApp rendering on Bazzite Desktop KDE with NVIDIA remains unverified;
+MangoApp enablement is not gated on that validation.

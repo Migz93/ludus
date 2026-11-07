@@ -115,8 +115,8 @@ Global fields are `scopebuddy` (boolean), `profile` (`adaptive`,
 `game_args`. Per-game fields are `mode` (`inherit`, `enabled`, `disabled`) and,
 for `enabled`, the same profile fields with `profile` also accepting `default`.
 A global policy saved without `profile` but with `wrapper_args` is treated as
-Custom. Disabling a game disables all managed launch additions for
-that game. Changing one feature preserves the other feature's settings.
+Custom. Disabling this policy disables ScopeBuddy and managed game arguments for
+that game; the independent MangoHud policy still applies. Changing one feature preserves the other feature's settings.
 
 At each Ludus login, after the private binds are active and before Steam starts,
 a worker running as the selected Linux player edits only the Steam account's
@@ -178,6 +178,64 @@ page.
 Accepted manual overrides survive resets and do not block uninstall. Uninstall
 otherwise stops while managed values or interrupted writes remain, unless the
 administrator explicitly uses `--force`. Private recovery records are retained.
+
+## MangoHud
+
+MangoHud is off by default. The Games page has one console-wide On/Off switch
+and one layout, with per-game Follow default, On, and Off overrides. There are
+no player-specific layouts or per-game visual settings. Font size is restricted
+to 18–64, with supported positions, FPS/frametime, CPU/GPU usage and temperatures,
+RAM/VRAM, and a validated X11 toggle hotkey (default `Shift_R+F12`). The starting
+font size is 32 at top-right. Advanced mode previews the generated configuration;
+it does not accept arbitrary MangoHud directives or executable config options.
+
+Optional `global.mangohud` fields in `/etc/ludus/game-settings.json` are `enabled`,
+`font_size`, `position`, `fps`, `frametime`, `cpu_stats`, `cpu_temp`, `gpu_stats`,
+`gpu_temp`, `ram`, `vram`, and `toggle_hud`. Per-game `mangohud` accepts only
+`mode` (`inherit`, `enabled`, `disabled`). Existing settings files need no migration.
+The shared game-settings lock and existing authenticated launch-options API are
+used for both features. Saving does not touch an active Steam session.
+
+The existing unprivileged launch worker writes the selected layout to
+`~/.config/ludus/mangohud/MangoHud.conf` (0600, parent directory 0700) before Steam
+starts. It never overwrites `~/.config/MangoHud/MangoHud.conf`. Before first
+enablement it retains a timestamped private copy of that user file, if present,
+in `~/.local/state/ludus/launch-options/mangohud-backups`. Backups survive resets
+and removal. Symlinks, unexpected file types and external changes to a managed
+config are rejected. Config writes are journalled and atomic.
+
+Activation follows the effective managed launch path automatically:
+
+- Without managed ScopeBuddy, the single Steam writer adds `MANGOHUD=1` and
+  `MANGOHUD_CONFIGFILE` using `env`. This enables Vulkan, including Proton games
+  using DXVK/VKD3D; it does not inject native OpenGL. There is no extra wrapper
+  executable dependency on this path.
+- With managed ScopeBuddy, it carries `MANGOHUD_CONFIGFILE` into the same wrapper
+  and adds `--mangoapp` exactly once to the generated Gamescope arguments. It does
+  not inject traditional MangoHud into Gamescope. This extends the command-based
+  design from PR #7; no ScopeBuddy config files are generated.
+- Existing external Gamescope/complex ScopeBuddy wrappers or MangoHud activation/config
+  in manual launch options are preserved and reported as conflicts. Existing
+  conflict actions apply to the whole launch command, across both features. A bare
+  `scb -- %command%` can still be adopted by the managed ScopeBuddy policy.
+
+MangoApp is requested when enabled, without a successful runtime probe as a
+prerequisite. An Applied state records successful configuration reconciliation,
+not confirmation that the overlay rendered. Runtime failures/overlay visibility
+need target diagnosis; Ludus does not monitor game processes or automatically
+disable games. Bazzite Desktop KDE/NVIDIA validation is still required.
+
+A config-generation failure is reported separately for MangoHud; other managed
+launch settings still reconcile, and Steam startup continues. The WebUI shows
+Applied — MangoHud, Applied — MangoApp via ScopeBuddy, pending changes, disabled,
+blocked conflicts, or errors per player/game. Changing one feature's policy
+preserves the other. Reset MangoHud queues removal of only its launch additions,
+then removes the unchanged private config once no actual Steam launch value
+references it. Original user settings remain available throughout. Conflicted
+or accepted manual commands that still reference the private config keep it
+intact. Uninstall blocks while private managed config or launch recovery remains;
+resume accepted management and reset to resolve those references, or deliberately
+use `--force` to retain the file and recovery records.
 
 ## Safety Rules
 

@@ -51,7 +51,7 @@ if [[ -x "$launch_helper" ]]; then
   launch_blockers=$("$launch_helper" uninstall-check) || launch_status=$?
   if (( launch_status != 0 )); then
     echo "Launch-options recovery needs attention: $launch_blockers" >&2
-    echo "Remove launch management in the Games page, then let affected players log in and out. Resolve conflicts or accept their manual overrides before retrying." >&2
+    echo "Remove ScopeBuddy/game arguments and reset MangoHud in the Games page, then let affected players log in and out. Resolve conflicts or accept their manual overrides before retrying." >&2
     if [[ "$force" != true ]]; then
       echo "Uninstall stopped. Use --force only to leave the current launch options in place." >&2
       exit 1

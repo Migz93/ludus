@@ -47,6 +47,9 @@ operation must be added to the backend's shared set explicitly.
   override, and Follow default clears them when saved; see each player's state,
   replace or accept manual conflicts, resume management, or queue restoration
   (including games no longer in the inventory)
+- configure a console-wide MangoHud layout, global enablement and per-game
+  inheritance, with a generated-config preview and per-player MangoHud/MangoApp
+  results; reset restores original user settings at the next login
 - inspect Ludus services, mounts, storage, and `ludusctl doctor` results on the
   Dashboard and Health pages
 - adopt an existing compatible disk without deleting its data; Ludus grants
@@ -82,3 +85,13 @@ Manual override, Unavailable, or Error where they apply. Error detail is shown
 on hover. Conflicts offer **Replace temporarily** and **Accept manual
 override**; accepted overrides offer **Resume management**. Player application
 appears only on specific game pages, not on the overall Games page.
+
+MangoHud uses `/api/games/launch-options` with `mangohud-global`,
+`mangohud-game`, and `mangohud-reset` save scopes, preserving the existing
+backend authorization and serialization. Global settings contain the layout
+editor; specific game pages contain only enablement overrides. The selected
+activation path is automatic. The normal path supports Vulkan; ScopeBuddy uses
+MangoApp without a probe requirement. Applied means configuration was reconciled,
+not that overlay visibility was verified. Errors and manual command conflicts are
+shown in Player application. ScopeBuddy/game-argument reset controls and MangoHud
+reset are independent; use both before uninstalling if both were managed.

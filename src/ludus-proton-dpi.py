@@ -38,7 +38,7 @@ def validate_config(value):
     global_settings, games = value.get("global"), value.get("games")
     if not isinstance(global_settings, dict) or not isinstance(games, dict):
         raise ValueError("invalid game-settings schema")
-    if set(value) != {"version", "global", "games"} or set(global_settings) - {"proton_overlay_dpi", "launch_options"}:
+    if set(value) != {"version", "global", "games"} or set(global_settings) - {"proton_overlay_dpi", "launch_options", "mangohud"}:
         raise ValueError("unknown game-settings field")
     dpi = global_settings.get("proton_overlay_dpi")
     if dpi is not None and dpi not in SCALES:
@@ -46,7 +46,7 @@ def validate_config(value):
     for appid, settings in games.items():
         if not isinstance(appid, str) or not APPID.fullmatch(appid) or not isinstance(settings, dict):
             raise ValueError("invalid per-game settings")
-        if set(settings) - {"proton_overlay_dpi", "launch_options"}:
+        if set(settings) - {"proton_overlay_dpi", "launch_options", "mangohud"}:
             raise ValueError(f"unknown setting for app {appid}")
         policy = settings.get("proton_overlay_dpi", "inherit")
         if policy not in ({"inherit", "disabled"} | set(SCALES)):
@@ -63,6 +63,17 @@ def validate_config(value):
         launch.validate_policy(global_settings.get("launch_options", {}))
         for item in games.values():
             launch.validate_policy(item.get("launch_options", {}), game=True)
+    if "mangohud" in global_settings or any("mangohud" in item for item in games.values()):
+        import importlib.machinery
+        import importlib.util
+        path = os.path.join(os.path.dirname(__file__), "ludus-mangohud")
+        if not os.path.exists(path): path += ".py"
+        loader = importlib.machinery.SourceFileLoader("mangohud", path)
+        spec = importlib.util.spec_from_loader("mangohud", loader)
+        hud = importlib.util.module_from_spec(spec)
+        loader.exec_module(hud)
+        hud.validate(global_settings.get("mangohud", {}))
+        for item in games.values(): hud.validate(item.get("mangohud", {}), game=True)
     return value
 
 

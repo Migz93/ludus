@@ -37,11 +37,8 @@ index 699e2ad..17701c1 100644
  class LoginGreeter : public QObject
  {
      Q_OBJECT
-@@ -131,6 +151,7 @@ int main(int argc, char *argv[])
+@@ -131,3 +151,4 @@ int main(int argc, char *argv[])
      qmlRegisterSingletonInstance("org.kde.plasma.login", 0, 1, "Settings", &PlasmaLoginSettings::getInstance());
      qmlRegisterSingletonInstance("org.kde.plasma.login", 0, 1, "StateConfig", StateConfig::self());
-     qmlRegisterSingletonInstance("org.kde.plasma.login", 0, 1, "BlurScreenBridge", new BlurScreenBridge);
 +    qmlRegisterSingletonInstance("org.kde.plasma.login", 0, 1, "RemoteLogin", new RemoteLogin);
- 
-     LoginGreeter greeter;
-     return app.exec();
+     qmlRegisterSingletonInstance("org.kde.plasma.login", 0, 1, "BlurScreenBridge", new BlurScreenBridge);

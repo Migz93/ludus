@@ -90,6 +90,13 @@ def private_directory(home, relative):
     return current
 
 
+def archive(home, content, io, prefix='MangoHud'):
+    directory = private_directory(home, '.local/state/ludus/launch-options/mangohud-backups')
+    path = directory / f'{prefix}-{time.time_ns()}-{uuid.uuid4().hex}.conf'
+    io.atomic_text(path, content)
+    return str(path)
+
+
 def prepare(home, policy, state, persist, io):
     """Capture audit backup before first enablement; never change the user's file."""
     path = config_path(home)
@@ -102,18 +109,19 @@ def prepare(home, policy, state, persist, io):
     if state.get('pending') is not None and current == state['pending']:
         state['last'] = state['pending']
     if current is not None and current != state.get('last'):
-        raise ValueError('Private Ludus MangoHud configuration changed outside Ludus; preserve it before retrying')
+        state['drift_backup'] = archive(home, current, io, 'Ludus-drift')
+        persist()
     if not state.get('backup_done'):
         user = Path(home) / '.config/MangoHud/MangoHud.conf'
-        if user.resolve() != user: raise ValueError('Refusing symlink in user MangoHud configuration')
-        try: original = io.read_text(user)[0]
-        except FileNotFoundError: original = None
-        if original is not None:
-            backup_dir = private_directory(home, '.local/state/ludus/launch-options/mangohud-backups')
-            backup = backup_dir / f'MangoHud-{time.time_ns()}-{uuid.uuid4().hex}.conf'
-            io.atomic_text(backup, original)
-            state['backup'] = str(backup)
-        state['backup_done'] = True
+        if user.resolve() != user:
+            state['backup_note'] = 'User MangoHud config is symlinked; audit backup skipped, original untouched'
+        else:
+            try: original = io.read_text(user)[0]
+            except FileNotFoundError: original = None
+            if original is not None:
+                state['backup'] = archive(home, original, io)
+                state['backup_done'] = True
+                state.pop('backup_note', None)
         persist()
     desired = render(policy)
     # Journal before writing so interruption cannot strand an unrecognised file.
@@ -128,18 +136,27 @@ def prepare(home, policy, state, persist, io):
 
 
 def cleanup(home, state, persist, io, referenced):
-    if referenced or not state.get('last') and not state.get('pending'): return
+    if referenced: return
+    if not state.get('last') and not state.get('pending'):
+        state.pop('error', None)
+        state.pop('backup_done', None)
+        state['status'] = 'restored'
+        persist()
+        return
     path = config_path(home)
     if path.resolve() != path: raise ValueError('Refusing symlink in MangoHud cleanup path')
     try: current = io.read_text(path)[0]
     except FileNotFoundError: current = None
     if current is not None and current not in (state.get('last'), state.get('pending')):
-        raise ValueError('Private Ludus MangoHud configuration changed; cleanup skipped')
+        if path.stat().st_uid != os.getuid(): raise ValueError('MangoHud config must belong to the player')
+        state['drift_backup'] = archive(home, current, io, 'Ludus-drift')
+        persist()
     if current is not None:
         path.unlink()
         fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
         try: os.fsync(fd)
         finally: os.close(fd)
+    state.pop('backup_done', None)
     state.pop('last', None)
     state.pop('pending', None)
     state.pop('error', None)

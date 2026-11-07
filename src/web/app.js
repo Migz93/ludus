@@ -1778,8 +1778,8 @@ function mangoApplicationState(record, applies, state) {
   if (state.error) return ['err', 'Error', state.error];
   if (record && (record.accepted || record.status === 'manual-override')) return [null, 'Manual override'];
   if (record && record.status === 'conflict') return ['err', 'Blocked — launch-options conflict', record.error];
-  if (state.mangohud && state.mangohud.error) return ['err', 'Error', state.mangohud.error];
-  if (record && record.mangohud_error) return ['err', 'Error', record.mangohud_error];
+  if (applies && state.mangohud && state.mangohud.error) return ['err', 'Error', state.mangohud.error];
+  if (applies && record && record.mangohud_error) return ['err', 'Error', record.mangohud_error];
   if (record && ['error', 'unavailable'].includes(record.status)) return launchApplicationState(record, applies);
   const previous = record && record.applied_policy && record.applied_policy.mangohud;
   if (!applies) return previous ? ['warn', 'Pending restore'] : [null, 'Disabled'];

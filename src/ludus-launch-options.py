@@ -401,6 +401,26 @@ def installed_apps(libraries):
     return result
 
 
+def hud_reference(value, path):
+    if not value or not path: return False
+    # Token comparison handles shell quoting, including apostrophes in homes.
+    try:
+        if 'MANGOHUD_CONFIGFILE=' + str(path) in shlex.split(value): return True
+    except ValueError: pass
+    # Preserve malformed/manual commands conservatively rather than deleting a
+    # config they might still reference.
+    return str(path) in value or shlex.quote(str(path)) in value
+
+
+def recovery_original(record, current, path):
+    if not hud_reference(current, path): return current
+    if 'original' not in record or hud_reference(record['original'], path):
+        raise ValueError('Cannot safely restore a command containing Ludus HUD references; manual conflict remains')
+    # Keep the pre-Ludus baseline, and retain the edited managed command for audit.
+    record['hud_manual_backup'] = current
+    return record['original']
+
+
 def reconcile_file(path, records, policy, installed, persist, scopebuddy, mangohud_path=None, mangohud_error=None):
     """Journal each planned value before replacing VDF; recover interrupted writes."""
     text, mode = read_text(path)
@@ -436,8 +456,15 @@ def reconcile_file(path, records, policy, installed, persist, scopebuddy, mangoh
             if hud_requested and mangohud_error: record['mangohud_error'] = mangohud_error
             else: record.pop('mangohud_error', None)
             if record.pop('resume', False):
-                record.pop('original', None)
-                record['managed'] = False
+                if hud_reference(current, mangohud_path):
+                    try: baseline = recovery_original(record, current, mangohud_path)
+                    except ValueError as error:
+                        record.update(status='conflict', current=current, error=str(error))
+                        continue
+                    record.update(original=baseline, last=current, managed=True, replaced=True)
+                else:
+                    record.pop('original', None)
+                    record['managed'] = False
             approved = record.pop('replace', None)
             if approved is not None:
                 # Approval covers only the exact value the administrator saw.
@@ -447,7 +474,11 @@ def reconcile_file(path, records, policy, installed, persist, scopebuddy, mangoh
                     continue
                 # Keep that value to restore, and build the managed command
                 # without it for as long as Ludus owns this game.
-                record.update(original=current, last=current, managed=True, replaced=True)
+                try: baseline = recovery_original(record, current, mangohud_path)
+                except ValueError as error:
+                    record.update(status='conflict', current=current, error=str(error))
+                    continue
+                record.update(original=baseline, last=current, managed=True, replaced=True)
             if record.get('managed') and current != record.get('last'):
                 record.update(status='conflict', current=current)
                 continue
@@ -584,7 +615,7 @@ def worker(request, home=None):
                 installed = installed_apps(request['libraries'] + [str(root)])
                 hud_state = state.setdefault('mangohud', {})
                 persist = lambda: json_write(path, state)
-                hud_path, hud_error = None, None
+                hud_path, hud_error = str(HUD.config_path(home)), None
                 if any(HUD.effective(request['config'], appid) is not None for appid in installed):
                     try:
                         hud_path = HUD.prepare(home, HUD.layout(request['config']), hud_state, persist, HUD_IO)
@@ -596,9 +627,10 @@ def worker(request, home=None):
                 # Keep the config if any actual Steam value still refers to it,
                 # including accepted manual overrides and unresolved conflicts.
                 apps = apps_block(read_text(vdf)[0])
-                referenced = any(str(HUD.config_path(home)) in (launch_value(apps, appid) or '')
+                referenced = any(hud_reference(launch_value(apps, appid), HUD.config_path(home))
                                  for appid in apps.entries)
-                if not referenced and hud_error is None:
+                requested_hud = any(HUD.effective(request['config'], appid) is not None for appid in installed)
+                if not referenced and not requested_hud:
                     try: HUD.cleanup(home, hud_state, persist, HUD_IO, referenced=False)
                     except (OSError, ValueError, UnicodeError) as error:
                         hud_state.update(status='error', error=str(error))

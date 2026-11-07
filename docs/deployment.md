@@ -56,7 +56,7 @@ system power or lock policy.
 | `/var/lib/ludus/proton-dpi` | Root-private per-player reconciliation state and first-change whole-file audit backups |
 | `/var/lib/ludus/launch-options` | Root-private list of players with possible launch-options recovery state, retained on removal |
 | `~/.local/state/ludus/launch-options` | Player-private launch-options originals, write journal, and accepted overrides (directory 0700, state 0600), retained on removal |
-| `~/.config/ludus/mangohud` | Player-private generated HUD config (0700 directory, 0600 file); removed after queued reset when unreferenced |
+| `~/.config/ludus/mangohud` | Player-private generated HUD config (0700 directory, 0600 file); config file removed after queued reset when unreferenced; directory retained |
 | `~/.local/state/ludus/launch-options/mangohud-backups` | Timestamped user MangoHud audit backups, retained on removal |
 | `/var/cache/ludus/game-art` | Validated local or official-Steam artwork cached by numeric app ID for the WebUI |
 | `/run/ludus` | WebUI backend socket, MQTT status, and transient requests |

@@ -198,11 +198,15 @@ used for both features. Saving does not touch an active Steam session.
 
 The existing unprivileged launch worker writes the selected layout to
 `~/.config/ludus/mangohud/MangoHud.conf` (0600, parent directory 0700) before Steam
-starts. It never overwrites `~/.config/MangoHud/MangoHud.conf`. Before first
-enablement it retains a timestamped private copy of that user file, if present,
+starts. It never overwrites `~/.config/MangoHud/MangoHud.conf`. Before enablement it retains a timestamped private copy of that user file, if present,
 in `~/.local/state/ludus/launch-options/mangohud-backups`. Backups survive resets
-and removal. Symlinks, unexpected file types and external changes to a managed
-config are rejected. Config writes are journalled and atomic.
+and removal. A symlinked user configuration is left untouched and its optional
+backup is skipped with an audit note; this does not prevent enablement. A file
+created later is backed up when first seen, and a later enablement after reset
+captures the then-current user file again. Symlinks in Ludus-managed paths and
+unexpected file types remain rejected. Drifted regular private configs are copied
+into the same private backup folder before regeneration or reset cleanup, so
+recovery does not require editing files by hand. Config writes are journalled and atomic.
 
 Activation follows the effective managed launch path automatically:
 
@@ -230,12 +234,24 @@ launch settings still reconcile, and Steam startup continues. The WebUI shows
 Applied — MangoHud, Applied — MangoApp via ScopeBuddy, pending changes, disabled,
 blocked conflicts, or errors per player/game. Changing one feature's policy
 preserves the other. Reset MangoHud queues removal of only its launch additions,
-then removes the unchanged private config once no actual Steam launch value
-references it. Original user settings remain available throughout. Conflicted
+then removes the private config once no actual Steam launch value
+references it and no installed game requests it. A drifted config is archived
+before removal; an enabled policy retains the config even if all games conflict. Original user settings remain available throughout. Conflicted
 or accepted manual commands that still reference the private config keep it
 intact. Uninstall blocks while private managed config or launch recovery remains;
-resume accepted management and reset to resolve those references, or deliberately
-use `--force` to retain the file and recovery records.
+resume accepted management and reset to resolve those references. Resume and
+Replace temporarily retain the earlier pre-Ludus restoration baseline when the
+edited command still contains Ludus's private HUD reference; the edited command
+is retained in the private recovery record as `hud_manual_backup` for audit.
+Restoration therefore returns to the pre-Ludus command, rather than re-enabling
+the overlay or preserving later edits to the managed command as active options.
+If no safe baseline exists, the record stays conflicted for administrator review.
+Alternatively, deliberately use `--force` to retain config and recovery records.
+
+ScopeBuddy management also reports existing manual MangoHud activation/config as
+a conflict even when the managed MangoHud policy is off. This can affect commands
+previously adopted by PR #7; their Steam values are preserved, avoiding traditional
+MangoHud nested inside Gamescope.
 
 ## Safety Rules
 

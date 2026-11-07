@@ -102,4 +102,6 @@ class MangoHudWebTests(unittest.TestCase):
         assert(mangoApplicationState({status:'applied',mangohud_status:'mangoapp'}, true, {})[1] === 'Applied — MangoApp via ScopeBuddy', 'MangoApp status');
         assert(mangoApplicationState({status:'pending-apply',mangohud_status:'mangoapp'}, true, {})[1] === 'Pending apply', 'do not show stale applied state');
         assert(mangoApplicationState({status:'conflict',error:'manual change'}, true, {})[1].startsWith('Blocked'), 'conflict status');
+        assert(mangoApplicationState({status:'disabled'}, false, {mangohud:{error:'old config error'}})[1] === 'Disabled', 'disabled games must not inherit player HUD errors');
+        assert(mangoApplicationState({status:'disabled'}, true, {mangohud:{error:'current config error'}})[1] === 'Error', 'enabled games must report config errors');
         ''')

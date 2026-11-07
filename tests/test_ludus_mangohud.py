@@ -126,10 +126,13 @@ class PrivateConfigTests(unittest.TestCase):
     def test_config_drift_and_symlinks_are_preserved(self):
         path = Path(self.prepare())
         path.write_text('manual')
-        with self.assertRaises(ValueError): self.prepare()
-        with self.assertRaises(ValueError): H.cleanup(self.home, self.state, self.persist, self.io, False)
-        self.assertEqual(path.read_text(), 'manual')
-        path.unlink()
+        self.prepare()
+        self.assertEqual(Path(self.state['drift_backup']).read_text(), 'manual')
+        self.assertIn('font_size=32', path.read_text())
+        path.write_text('second manual change')
+        H.cleanup(self.home, self.state, self.persist, self.io, False)
+        self.assertEqual(Path(self.state['drift_backup']).read_text(), 'second manual change')
+        self.assertFalse(path.exists())
         target = self.home / 'target'
         target.write_text('keep')
         path.symlink_to(target)
@@ -142,6 +145,31 @@ class PrivateConfigTests(unittest.TestCase):
         (self.home / '.config').symlink_to(target)
         with self.assertRaises(ValueError): self.prepare()
         self.assertEqual(list(target.iterdir()), [])
+
+    def test_symlinked_optional_user_config_does_not_block(self):
+        user = self.home / '.config/MangoHud/MangoHud.conf'
+        user.parent.mkdir(parents=True)
+        target = self.home / 'dotfile'
+        target.write_text('font_size=20')
+        user.symlink_to(target)
+        path = Path(self.prepare())
+        self.assertTrue(path.exists())
+        self.assertIn('skipped', self.state['backup_note'])
+        self.assertEqual(target.read_text(), 'font_size=20')
+
+    def test_later_user_config_and_reenable_are_backed_up(self):
+        self.prepare()
+        self.assertNotIn('backup_done', self.state)
+        user = self.home / '.config/MangoHud/MangoHud.conf'
+        user.parent.mkdir(parents=True)
+        user.write_text('later config')
+        self.prepare()
+        self.assertEqual(Path(self.state['backup']).read_text(), 'later config')
+        H.cleanup(self.home, self.state, self.persist, self.io, False)
+        user.write_text('changed before reenable')
+        self.prepare()
+        self.assertEqual(Path(self.state['backup']).read_text(), 'changed before reenable')
+
 
 
 class WorkerTests(unittest.TestCase):
@@ -196,7 +224,12 @@ class WorkerTests(unittest.TestCase):
         result = self.run_policy()
         self.assertEqual(result['accounts']['123']['42']['status'], 'conflict')
         self.assertEqual(self.current(), 'gamescope -f -- %command%')
-        self.assertFalse(H.config_path(self.home).exists())
+        path = H.config_path(self.home)
+        self.assertTrue(path.exists())
+        mtime = path.stat().st_mtime_ns
+        self.run_policy()
+        self.assertEqual(path.stat().st_mtime_ns, mtime)
+        self.assertEqual(result['mangohud']['status'], 'applied')
 
     def test_config_failure_does_not_block_scopebuddy_or_steam(self):
         with mock.patch.object(H, 'prepare', side_effect=OSError('read-only config')):
@@ -236,10 +269,85 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(self.current(), 'scb -- %command% -old')
 
     def test_mangoapp_is_applied_without_a_probe(self):
-        with mock.patch.object(L.shutil, 'which', return_value=None):
+        self.tools.stop()
+        with mock.patch.object(L.shutil, 'which', side_effect=lambda name, path=None:
+                               '/usr/bin/' + name if name in ('scb', 'gamescope', 'kscreen-doctor', 'jq') else None) as which:
             result = self.run_policy(config(scb=True))
+        self.assertNotIn('mangoapp', [call.args[0] for call in which.call_args_list])
         self.assertIn('--mangoapp', self.current())
         self.assertEqual(result['accounts']['123']['42']['mangohud_status'], 'mangoapp')
+
+    def action(self, scope):
+        return L.worker({'action': scope, 'account': '123', 'appid': '42'}, self.home)
+
+    def test_accept_reset_resume_restores_pre_ludus_baseline(self):
+        for scoped in (False, True):
+            with self.subTest(scoped=scoped):
+                self.run_policy(config(scb=scoped))
+                edited = self.current() + ' -foo'
+                self.vdf.write_text(document(edited))
+                self.run_policy()
+                self.action('accept')
+                self.run_policy(config(hud=False))
+                self.action('resume')
+                state = self.run_policy()
+                self.assertEqual(self.current(), '-old')
+                self.assertEqual(state['accounts']['123']['42']['hud_manual_backup'], edited)
+                self.assertFalse(H.config_path(self.home).exists())
+                self.assertFalse(L.uninstall_blockers({'users': {'alice': state}}, ['alice']))
+
+    def test_replace_reset_restores_pre_ludus_baseline(self):
+        self.run_policy()
+        edited = self.current() + ' -foo'
+        self.vdf.write_text(document(edited))
+        self.run_policy()
+        self.action('replace')
+        self.run_policy()
+        self.assertIn('MANGOHUD=1', self.current())
+        state = self.run_policy(config(hud=False))
+        self.assertEqual(self.current(), '-old')
+        self.assertEqual(state['accounts']['123']['42']['hud_manual_backup'], edited)
+        self.assertFalse(L.uninstall_blockers({'users': {'alice': state}}, ['alice']))
+
+    def test_no_safe_baseline_keeps_recovery_actionable(self):
+        self.run_policy()
+        edited = self.current() + ' -foo'
+        self.vdf.write_text(document(edited))
+        self.run_policy()
+        path = self.home / '.local/state/ludus/launch-options/state.json'
+        state = L.json_read(path, {})
+        state['accounts']['123']['42']['original'] = edited
+        L.json_write(path, state)
+        self.action('replace')
+        state = self.run_policy(config(hud=False))
+        self.assertEqual(state['accounts']['123']['42']['status'], 'conflict')
+        self.assertEqual(self.current(), edited)
+
+    def test_failed_initial_prepare_then_disable_clears_error(self):
+        with mock.patch.object(H, 'prepare', side_effect=ValueError('symlink')):
+            state = self.run_policy()
+        self.assertIn('error', state['mangohud'])
+        state = self.run_policy(config(hud=False))
+        self.assertNotIn('error', state['mangohud'])
+        self.assertEqual(state['mangohud']['status'], 'restored')
+
+    def test_quoted_home_reference_keeps_config_on_conflict_and_accept(self):
+        home = self.home / "o'brien"
+        home.mkdir()
+        for entry in list(self.home.iterdir()):
+            if entry != home: entry.rename(home / entry.name)
+        self.vdf = home / self.vdf.relative_to(self.home)
+        self.home = home
+        self.run_policy()
+        self.assertNotIn(str(H.config_path(home)), self.current())
+        edited = self.current() + ' -manual'
+        self.vdf.write_text(document(edited))
+        self.run_policy(config(hud=False))
+        self.assertTrue(H.config_path(home).exists())
+        self.action('accept')
+        self.run_policy()
+        self.assertTrue(H.config_path(home).exists())
+
 
     def test_layout_change_is_pending_then_applied(self):
         result = self.run_policy()

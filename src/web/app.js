@@ -1650,9 +1650,9 @@ function launchOptionsCard(settings, appid) {
     const policy = appid && mode.value === 'inherit' ? base : chosen;
     const argsText = [appid ? base.game_args : '', overriding ? gameArgs.value : ''].filter(Boolean).join(' ');
     const hud = mangoEnabled(settings, appid);
-    const wrapper = scoped ? scopebuddyWrapper(policy) : '';
-    const withHud = hud && scoped && !wrapper.split(/\s+/).includes('--mangoapp')
-      ? wrapper.replace(/ --$/, ' --mangoapp --') : wrapper;
+    const wrapperCommand = scoped ? scopebuddyWrapper(policy) : '';
+    const withHud = hud && scoped && !wrapperCommand.split(/\s+/).includes('--mangoapp')
+      ? wrapperCommand.replace(/ --$/, ' --mangoapp --') : wrapperCommand;
     const hudEnv = hud ? 'env MANGOHUD_CONFIGFILE=<player-private-Ludus-config>' + (scoped ? '' : ' MANGOHUD=1') : '';
     preview.textContent = [hudEnv, withHud, '%command%', appid && mode.value === 'disabled' ? '' : argsText].filter(Boolean).join(' ');
   }

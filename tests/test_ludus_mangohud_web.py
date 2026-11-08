@@ -49,6 +49,55 @@ class MangoHudWebTests(unittest.TestCase):
     def test_full_application_syntax(self):
         self.execute(self.source, syntax=True)
 
+    def test_launch_preview_with_inherited_and_explicit_policies(self):
+        source = self.source[self.source.index('const LAUNCH_PROFILES ='):self.source.index('function mangoHudCard(')]
+        self.execute(r'''
+        const nodes = [];
+        function el(tag, props, ...children) {
+          const n = Object.assign({tag, children: children.flat(Infinity).filter(Boolean), listeners: {},
+            addEventListener(event, cb) { this.listeners[event] = cb; }}, props);
+          if (tag === 'select') n.value = (n.children.find(x => x.selected) || n.children[0]).value;
+          nodes.push(n);
+          return n;
+        }
+        const card = (...children) => el('card', null, children);
+        const cardHead = text => el('header', {text});
+        const notice = () => el('notice');
+        function assert(value, message) { if (!value) throw new Error(message); }
+        function field(label) { return nodes.find(n => n['aria-label'] === label); }
+        ''' + source + r'''
+        for (const scopebuddy of [false, true]) {
+          for (const enabled of [false, true]) {
+            nodes.length = 0;
+            const settings = {available: true, global: {scopebuddy, profile: 'adaptive', game_args: '-novid'},
+              games: {}, mangohud: {global: {enabled}, games: {}}};
+            launchOptionsCard(settings, '1903340');
+            const preview = nodes.find(n => n.tag === 'code');
+            const mode = field('Game ScopeBuddy policy');
+            assert(mode.value === 'inherit', 'game should start with inherited settings');
+            assert(preview.textContent.includes('%command% -novid'), 'inherited arguments should be previewed');
+            assert(preview.textContent.includes('scb') === scopebuddy, 'inherited ScopeBuddy preview');
+            assert(preview.textContent.includes('--mangoapp') === (scopebuddy && enabled), 'MangoApp composition');
+            mode.value = 'enabled';
+            mode.listeners.change();
+            field('ScopeBuddy profile').value = 'custom';
+            field('ScopeBuddy Arguments').value = '-f -W 3840';
+            field('Game Arguments').value = '-debug';
+            field('ScopeBuddy Arguments').listeners.input();
+            assert(preview.textContent.includes('scb -f -W 3840'), 'custom wrapper input should update preview');
+            assert(preview.textContent.includes('%command% -novid -debug'), 'game arguments should update preview');
+            mode.value = 'inherit';
+            mode.listeners.change();
+            assert(field('ScopeBuddy Arguments').value === '', 'inherit should clear wrapper input');
+            assert(field('Game Arguments').value === '', 'inherit should clear game arguments');
+            mode.value = 'disabled';
+            mode.listeners.change();
+            assert(!preview.textContent.includes('scb'), 'disabled policy should omit ScopeBuddy');
+            assert(!preview.textContent.includes('-novid'), 'disabled policy should omit game arguments');
+          }
+        }
+        ''')
+
     def test_controls_preview_validation_save_and_status(self):
         start = self.source.index('function mangoEnabled(')
         end = self.source.index('/* One at-a-glance', start)
